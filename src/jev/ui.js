@@ -22,6 +22,7 @@ import {
     migrateBrowserKeyToServer, setFeatureMode, setJevKey,
 } from "./settings.js";
 import { jevProviderList } from "./client.js";
+import { jevLastError } from "./index.js";
 import { openSetupAssistant, openLoadoutSuggestion, openAddonDiagnostics, openReplyDoctor, openContextBudgetPreview } from "./tools.js";
 
 const esc = v => $("<span>").text(String(v ?? "")).html();
@@ -35,10 +36,12 @@ const timeOf = at => new Date(at).toLocaleString([], { month: "short", day: "num
 const STORAGE_NOTE = "Plaintext in this user's server-side settings.json (globalSettings.jev.key). Synced across sessions and browsers; readable by anyone with access to the SillyTavern data directory or its settings backups.";
 
 function statusLine() {
+    const err = jevLastError();
+    const tail = err && Date.now() - err.at < 300000 ? ` · last error: ${err.message}` : "";
     if (!jevSettings().enabled) return "Off. Nothing is sent anywhere.";
-    if (!jevSettings().optIn) return "Waiting for consent: story text is not sent until you turn consent on.";
-    if (!getJevKey()) return "Waiting for a key.";
-    return `Ready · ${keyHint()} · kept in server settings · ${jevSettings().shadow ? "every feature is in shadow mode" : "per-feature modes apply"}`;
+    if (!jevSettings().optIn) return `Waiting for consent: story text is not sent until you turn consent on.${tail}`;
+    if (!getJevKey()) return `Waiting for a key.${tail}`;
+    return `Ready · ${keyHint()} · kept in server settings · ${jevSettings().shadow ? "every feature is in shadow mode" : "per-feature modes apply"}${tail}`;
 }
 
 // ── The settings section ────────────────────────────────────────────────────
@@ -96,7 +99,7 @@ export function appendJevSettings($content) {
             <div class="mtab-setting-row" style="padding:10px 0 0 0; border:none;">
                 <div class="set-info">
                     <div class="set-label"><i class="fa-solid fa-tag" style="color:#38bdf8;"></i> Model</div>
-                    <div class="set-desc">Pinned on purpose. Thresholds are tuned against the model they were measured on; switching models changes the cache identity and the evaluation set.</div>
+                    <div class="set-desc">Bare System One ids (<code>jev-1.13</code>) or a prefixed one (<code>typesafe/jev-1.13</code>). The response reports the exact model that served it, and every decision row logs that. Changing it changes every cache identity.</div>
                 </div>
                 <input type="text" id="jev_model" class="ps-modern-input" style="width:230px;" value="${esc(s.model)}" />
             </div>
@@ -204,7 +207,7 @@ export function appendJevSettings($content) {
         repaint();
     });
     $content.find("#jev_model").on("change", function () {
-        jevSettings().model = String($(this).val() || "").trim() || "jev-1.14.0";
+        jevSettings().model = String($(this).val() || "").trim() || "jev-1.13";
         saveSettingsDebounced();
     });
     $content.find("#jev_log_raw").on("change", function () {

@@ -27,10 +27,13 @@ README on the stable branch.
   backups, readable by anyone with access to the SillyTavern data directory. It
   is still never copied into presets, extension profiles, the decision log,
   diagnostics exports or error messages.
-- **Provider and model are pinned.** OpenRouter's System One route is the
-  default (its browser preflight passes and it uses TypeSafe's shape); Vercel's
-  AI Gateway is the alternative behind the same validation. Changing the model
-  changes every cache identity and every threshold's meaning.
+- **Provider and model.** OpenRouter's System One route is the default (its
+  browser preflight passes and it uses TypeSafe's shape); Vercel's AI Gateway is
+  the alternative behind the same validation. The model id is a System One id —
+  `jev-1.13` on OpenRouter, not TypeSafe's `jev-1.14.0` from its own version
+  list, which the provider rejects with "Model does not exist". The decision log
+  records the exact model that answered. Changing it changes every cache
+  identity and every threshold's meaning.
 - **Shadow mode is on by default.** Every judgment is made, compared with what
   the suite would have done, and logged — and nothing changes. Only a feature
   you set to **on**, with shadow mode off, can act, and only when its policy is

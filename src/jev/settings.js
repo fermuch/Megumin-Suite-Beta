@@ -31,7 +31,7 @@ const DEFAULTS = {
     enabled: false,       // master switch for the whole runtime
     optIn: false,         // explicit consent to send story text to a third party
     provider: "openrouter",
-    model: "jev-1.14.0",  // pinned: thresholds are only valid for the model they were tuned on
+    model: "jev-1.13",    // documented System One id on OpenRouter; the response reports what served it
     key: "",              // server-side, like every other JEV setting
     shadow: true,         // force every feature into shadow regardless of its own mode
     logRaw: false,        // opt-in fixtures: keep the exact state sent, not just metadata
@@ -60,6 +60,10 @@ export function jevSettings() {
         if (jev[k] === undefined) jev[k] = v;
     }
     if (!jev.features || typeof jev.features !== "object") jev.features = {};
+    // `jev-1.14.0` came from TypeSafe's model list but is not an id OpenRouter's
+    // System One API accepts (400 "Model ... does not exist"); 1.13 is the id its
+    // own System One example uses. Move the broken value once.
+    if (jev.model === "jev-1.14.0" || jev.model === "jev-latest") jev.model = "jev-1.13";
     return jev;
 }
 

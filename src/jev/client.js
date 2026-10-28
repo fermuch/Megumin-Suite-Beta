@@ -32,7 +32,11 @@ const OPENROUTER = {
     url: "https://openrouter.ai/api/v1/systemone",
     keyHint: "OpenRouter key (sk-or-…)",
     wireType: t => t,
-    model: m => m || "jev-1.14.0",
+    // OpenRouter's System One API takes TypeSafe's bare ids (`jev-1.13`) and
+    // maps them into its `typesafe/` namespace; a prefixed id is used as-is.
+    // Ids from TypeSafe's own version list (e.g. `jev-1.14.0`) are NOT in that
+    // set and the provider answers 400 "Model ... does not exist".
+    model: m => String(m || "").trim() || "jev-1.13",
     answers: body => body && body.answers,
 };
 
@@ -199,9 +203,18 @@ export async function jevRequest({ questions, state, signal }) {
     }
 
     if (!res.ok) {
-        // Status only: a response body can echo the request, and the request can
-        // contain story text or a key fragment the provider chose to repeat.
-        throw new JevError("http", `JEV provider returned HTTP ${res.status}.`);
+        // Status stays the primary signal. A model/authorisation error is the one
+        // case where the provider's own sentence is both safe and actionable, so
+        // it is surfaced when it names a model and nothing else is quoted.
+        let detail = "";
+        try {
+            const body = await res.json();
+            const msg = body && body.error && body.error.message;
+            if (typeof msg === "string" && /\bmodel\b/i.test(msg)) detail = ` ${msg.slice(0, 160)}`;
+        } catch (e) {
+            // no readable body: status is enough
+        }
+        throw new JevError("http", `JEV provider returned HTTP ${res.status}.${detail}`);
     }
 
     let body;

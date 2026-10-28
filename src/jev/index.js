@@ -31,6 +31,14 @@ import { featureMode, jevReady, jevSettings, jevUnavailableReason } from "./sett
 // retry loop cannot turn into a silent spend.
 let callsThisTurn = 0;
 
+// The last hard failure, for the settings panel. Not persisted: it is a
+// diagnostic for "why did nothing happen", not story or account data.
+let lastError = null;
+
+export function jevLastError() {
+    return lastError;
+}
+
 export function jevNewTurn() {
     callsThisTurn = 0;
 }
@@ -90,8 +98,11 @@ export async function jevJudge(feature, ctx = {}, opts = {}) {
         response = await jevRequest({ questions: built.questions, state: built.state, signal: opts.signal });
     } catch (e) {
         const kind = e instanceof JevError ? e.kind : "error";
-        if (kind !== "aborted") console.debug(`[Megumin-Suite] JEV "${feature}" unavailable: ${kind}`);
-        return { ...base, reason: kind, error: kind };
+        const message = e instanceof JevError ? e.message : String(e && e.message || e);
+        lastError = { feature, kind, message, at: Date.now() };
+        // A rejected model or a refused key is actionable; a timeout is not.
+        if (kind !== "aborted") console.warn(`[Megumin-Suite] JEV "${feature}" unavailable: ${message}`);
+        return { ...base, reason: kind, error: message };
     }
 
     const { route, confidence, reason } = decide(feature, response.answers, ctx);
