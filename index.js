@@ -127,12 +127,13 @@ import { npcParseUpdateBlocks, npcApplyUpdates, npcUndoHistoryEntry } from "./sr
 import { renderNpcBank, renderNpcList } from "./src/features/npc/ui.js";
 import {
     stateOnMessageReceived, stateOnSwiped, stateOnSwipeDeleted, stateOnEdited, stateOnDeleted, stateOnChatLoaded,
-    setWorldStateChangedHook, getWorldState, worldHasState,
+    setWorldStateChangedHook, getWorldState, worldHasState, currentNotebookTruths,
 } from "./src/state/index.js";
 import { jevNewTurn } from "./src/jev/index.js";
 import { getReplyAssessment, setAssessmentContextProvider } from "./src/jev/assessments.js";
 import { setImageCastProvider } from "./src/features/imagegen/jev.js";
 import { npcJevWorthDossier, npcFilterUpdates } from "./src/features/npc/jev.js";
+import { setNpcKnowledgeTruths, verifyNpcKnowledge } from "./src/features/npc/knowledge.js";
 import { jevArcSignal, jevCheckDirective, directiveWarningText } from "./src/features/storyplan/jev.js";
 import { verifyDiceReply } from "./src/features/blocks/jevDiceVerify.js";
 import { currentImageCast } from "./src/features/imagegen/v2/index.js";
@@ -526,7 +527,7 @@ jQuery(async () => {
                 const chatAtEvent = getContext().chatId;
                 setTimeout(() => {
                     if (getContext().chatId !== chatAtEvent) return;
-                    if (stateOnChatLoaded()) meguminScheduleBlocksRefresh();
+                    if (stateOnChatLoaded()) { setNpcKnowledgeTruths(currentNotebookTruths()); meguminScheduleBlocksRefresh(); }
                 }, 250);
             });
             // IMAGE GEN AUTO-GEN & SWIPE TRIGGERS
@@ -564,6 +565,10 @@ jQuery(async () => {
                     if (!emptyReply) {
                         verifyDiceReply(cleanAIOutput(String(replyNow.mes || ""))).catch(() => {});
                     }
+                    // Per-NPC knowledge boundaries: refresh what the prompt may
+                    // tell each dossier, then check the reply against it.
+                    setNpcKnowledgeTruths(currentNotebookTruths());
+                    if (!emptyReply) verifyNpcKnowledge(String(replyNow.mes || "")).catch(() => {});
                     // Image Gen V2: a character who just arrived gets a look.
                     v2LooksForArrivals();
                 } catch (e) {

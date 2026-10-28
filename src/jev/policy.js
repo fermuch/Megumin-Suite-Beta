@@ -33,6 +33,7 @@ export const FEATURES = {
     "npc.shortlist": { stage: 2, label: "NPC shortlist", summary: "Pick which of the whole bank is worth a full dossier ranking." },
     "npc.rank": { stage: 2, label: "NPC relevance", summary: "Rank the shortlisted dossiers and image tags by this scene." },
     "npc.dossier": { stage: 3, label: "New NPC gate", summary: "Only create a dossier for a named, recurring character." },
+    "npc.knowledge": { stage: 3, label: "NPC knowledge", summary: "Catch a character using a truth they were never told." },
     "npc.match": { stage: 3, label: "NPC names", summary: "Resolve an update's name to a known character under another spelling." },
     "npc.identity": { stage: 3, label: "Identity merge", summary: "Suggest, never apply, when two NPC records look like one person." },
     "npc.updates": { stage: 3, label: "NPC updates", summary: "Check a dossier change against the reply, and resolve removal targets." },
@@ -381,6 +382,24 @@ const POLICIES = {
         const create = named >= 0.7 && worth >= 0.75 && exists < 0.5;
         const suggest = named >= 0.7 && worth >= 0.75 && exists >= 0.5 && exists < 0.8;
         return { route: { create, suggestExisting: suggest, named, worth, exists }, confidence, reason: create ? "create" : suggest ? "existing" : "skip" };
+    },
+
+    "npc.knowledge": (answers, ctx) => {
+        const npcs = (ctx.npcs || []).slice(0, 3);
+        const issues = [];
+        let low = 1;
+        let any = false;
+        npcs.forEach((n, i) => {
+            (n.unknown || []).slice(0, 2).forEach((secret, j) => {
+                const a = answers[`n${i}_k${j}_used`];
+                if (!a) return;
+                any = true;
+                low = Math.min(low, certainty(a.noul));
+                if (a.noul >= 0.7) issues.push(`${n.name} may know "${String(secret).slice(0, 80)}" which they were never told`);
+            });
+        });
+        if (!any) return { route: null, confidence: 0, reason: "nothing to check" };
+        return { route: { issues }, confidence: clamp01(low), reason: issues.length ? issues.join("; ") : "clean" };
     },
 
     "npc.match": (answers, ctx) => {

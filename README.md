@@ -55,8 +55,10 @@ README on the stable branch.
   dossiers and image tags. The old keyword shortlist is only the fallback. Plus a
   gate on creating a dossier for a background extra, verification of dossier
   changes (each removal resolved against its own field's existing lines, and an
-  update addressed to an unknown name checked through identity), and a
-  portrait/outfit-tag review before ComfyUI.
+  update addressed to an unknown name checked through identity), a
+  portrait/outfit-tag review before ComfyUI, and knowledge boundaries: every
+  dossier carries a "does NOT know" line built from the Notebook's Hidden-from
+  lists, and a reply that has a named NPC use one of those truths is reported.
 - **Story Director** — whether the arc is complete, stalled or redirected. When
   JEV is confident it decides in both directions; the tracker regex and the
   frequency counter are the fallback. Generated directives are checked before

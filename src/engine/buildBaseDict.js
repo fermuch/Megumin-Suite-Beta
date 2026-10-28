@@ -20,6 +20,7 @@ import { applyEnhancedDialogue } from "../../data/modes/v10.js";
 import { blocksEnvelopeParts, buildBlocksEnvelope, blockRulesText, blocksSkeletonSplit } from "../features/blocks/registry.js";
 import { buildConfigBlock } from "../features/storyconfig/config.js";
 import { npcBuildTextFromData } from "../features/npc/data.js";
+import { npcKnowledgeLine } from "../features/npc/knowledge.js";
 import { imageInjectionNpcTags, imageV2InlineInstruction, imageV2InlineSplit, imageViaChomusuke } from "../features/imagegen/index.js";
 import { npcBuildDossierPrompt, npcBuildUpdatePrompt, npcBuildDossierPromptSplit, npcBuildUpdatePromptSplit } from "../features/npc/fields.js";
 import { memGetCachedKeywords } from "../features/memory/keywords.js";
@@ -849,7 +850,7 @@ export function buildBaseDict(isTokenCount = false) {
                         if (npcBudgetDrops.size) topNpcs = topNpcs.filter(n => !npcBudgetDrops.has(n.name));
                         
                         let npcXML = "<retrieved_npcs>\n";
-                        topNpcs.forEach(n => { npcXML += `<${n.name}>\n${npcBuildTextFromData(n)}\n</${n.name}>\n\n`; });
+                        topNpcs.forEach(n => { const boundary = npcKnowledgeLine(n.name); npcXML += `<${n.name}>\n${npcBuildTextFromData(n)}${boundary ? "\n" + boundary : ""}\n</${n.name}>\n\n`; });
                         npcXML += "</retrieved_npcs>";
                         
                         dict["[[npc list]]"] = `[RELEVANT NPCs]\nThe following are details of known NPCs relevant to the current context:\n${npcXML}`;

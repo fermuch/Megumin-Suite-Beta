@@ -287,6 +287,18 @@ const BUILDERS = {
         },
     }),
 
+    // P12/P16 — did a character use a truth they were never told?
+    "npc.knowledge": (ctx) => {
+        const npcs = (ctx.npcs || []).slice(0, 3);
+        const questions = {};
+        npcs.forEach((n, i) => {
+            (n.unknown || []).slice(0, 2).forEach((secret, j) => {
+                questions[`n${i}_k${j}_used`] = noul(`The reply involves ${text(n.name, 120)}. Does it have them state, act on, or clearly imply "${text(secret, 200)}", which they were never told?`);
+            });
+        });
+        return { version: 1, state: { reply: text(ctx.reply, 5000) }, questions };
+    },
+
     // P16 (names) — is an update's name a known character under another spelling?
     "npc.match": (ctx) => {
         const candidates = (ctx.candidates || []).slice(0, 3);

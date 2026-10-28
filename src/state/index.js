@@ -699,7 +699,7 @@ function notebookInPlay() {
 // "missing" anything: nothing is recorded for it.
 // A reply Chomusuke already read keeps Chomusuke's lines when its text is
 // recorded again (an edit, a continue): only the reply's own part is re-read.
-function notebookCurrentTruths() {
+export function currentNotebookTruths() {
     try { return liveTruths(stateStore.getStateAt("notebook", Number.POSITIVE_INFINITY)); } catch (e) { return []; }
 }
 
@@ -745,7 +745,7 @@ async function notebookRecord(index) {
     const base = notebookModule.parse(text);
     const filtered = await jevCheckNotebook(base, storyProse(text));
     stateStore.recordMessage(index, { moduleIds: ["notebook"], parsed: filtered });
-    const leaks = await jevCheckSecretLeaks(storyProse(text), notebookCurrentTruths());
+    const leaks = await jevCheckSecretLeaks(storyProse(text), currentNotebookTruths());
     reportSecretLeaks(leaks);
 }
 
@@ -760,7 +760,7 @@ async function fileNotebookRead(at, swipe, replyText, block) {
     const base = parseNotebookRead(replyText, block) || { kind: "delta", ops: [] };
     const parsed = await jevCheckNotebook(base, storyProse(replyText));
     stateStore.recordMessage(at, { source: "sidemodel", moduleIds: ["notebook"], swipe, parsed, raw: joinNotebookRead(replyText, block) });
-    const leaks = await jevCheckSecretLeaks(storyProse(replyText), notebookCurrentTruths());
+    const leaks = await jevCheckSecretLeaks(storyProse(replyText), currentNotebookTruths());
     reportSecretLeaks(leaks);
 }
 
