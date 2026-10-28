@@ -199,9 +199,29 @@ const BUILDERS = {
         },
     }),
 
-    // P15 — NPC dossiers and image tags by scene relevance.
+    // P15 stage 1 — which of the whole bank deserves a full look? Compact
+    // roster (name + one line), two Nouls each, all in one request.
+    "npc.shortlist": (ctx) => {
+        const roster = (ctx.roster || ctx.candidates || []).slice(0, 20);
+        const questions = {};
+        roster.forEach((c, i) => {
+            const name = text(c.name || c.id, 120);
+            questions[`c${i}_relevant`] = noul(`Does the latest exchange involve, mention, or directly concern ${name}?`);
+            questions[`c${i}_present`] = noul(`Is ${name} physically present in the scene now, rather than only remembered or discussed?`);
+        });
+        return {
+            version: 1,
+            state: {
+                exchange: text(ctx.exchange, 5000),
+                roster: roster.map(c => ({ id: text(c.name || c.id, 120), brief: text(c.brief, 240) })),
+            },
+            questions,
+        };
+    },
+
+    // P15 stage 2 — full dossiers for the shortlist stage 1 produced.
     "npc.rank": (ctx) => {
-        const candidates = (ctx.candidates || []).slice(0, 3);
+        const candidates = (ctx.candidates || []).slice(0, 5);
         const questions = {};
         candidates.forEach((c, i) => {
             questions[`c${i}_relevant`] = score(`How relevant is ${c.name} to this reply's conversation, as context for the story model?`, RELEVANCE);

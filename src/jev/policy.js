@@ -28,7 +28,8 @@ export const FEATURES = {
     "memory.archive": { stage: 2, label: "Archive duplicates", summary: "Link, flag, or route duplicate and superseded archives." },
     "notebook.clue": { stage: 2, label: "Notebook clues", summary: "Decide whether prose reveals a clue or only mentions it." },
     "notebook.secret": { stage: 2, label: "Secret knowledge", summary: "Check who learned a secret, and whether someone leaks what they never knew." },
-    "npc.rank": { stage: 2, label: "NPC relevance", summary: "Rank dossiers and image tags by this scene, not keyword overlap." },
+    "npc.shortlist": { stage: 2, label: "NPC shortlist", summary: "Pick which of the whole bank is worth a full dossier ranking." },
+    "npc.rank": { stage: 2, label: "NPC relevance", summary: "Rank the shortlisted dossiers and image tags by this scene." },
     "npc.dossier": { stage: 3, label: "New NPC gate", summary: "Only create a dossier for a named, recurring character." },
     "npc.identity": { stage: 3, label: "Identity merge", summary: "Suggest, never apply, when two NPC records look like one person." },
     "npc.updates": { stage: 3, label: "NPC updates", summary: "Check a dossier change against the reply, and resolve removal targets." },
@@ -273,8 +274,34 @@ const POLICIES = {
         };
     },
 
+    "npc.shortlist": (answers, ctx) => {
+        const roster = (ctx.roster || []).slice(0, 20);
+        if (!roster.length) return { route: null, confidence: 0, reason: "no roster" };
+        const ids = [];
+        roster.forEach((_, i) => ids.push(`c${i}_relevant`, `c${i}_present`));
+        if (!have(answers, ids)) return { route: null, confidence: 0, reason: "incomplete" };
+
+        const rows = roster.map((c, i) => {
+            const relevant = noul(answers, `c${i}_relevant`) ?? 0;
+            const present = noul(answers, `c${i}_present`) ?? 0;
+            return {
+                name: c.name || c.id,
+                relevant,
+                present,
+                value: Math.max(relevant, present),
+                cert: Math.max(certainty(relevant), certainty(present)),
+            };
+        });
+        const keep = rows.filter(r => r.value >= 0.5).sort((a, b) => b.value - a.value).slice(0, 5);
+        const certainNone = rows.every(r => r.value <= 0.3);
+        if (!keep.length && !certainNone) return { route: null, confidence: 0, reason: "uncertain" };
+        const used = keep.length ? keep : rows;
+        const confidence = clamp01(used.reduce((sum, r) => sum + r.cert, 0) / used.length);
+        return { route: { names: keep.map(r => r.name), rows }, confidence, reason: keep.length ? "shortlisted" : "none" };
+    },
+
     "npc.rank": (answers, ctx) => {
-        const candidates = (ctx.candidates || []).slice(0, 3);
+        const candidates = (ctx.candidates || []).slice(0, 5);
         if (!candidates.length) return { route: null, confidence: 0, reason: "no candidates" };
         const ids = [];
         candidates.forEach((_, i) => ids.push(`c${i}_relevant`, `c${i}_present`));

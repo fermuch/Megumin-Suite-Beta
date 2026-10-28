@@ -49,9 +49,11 @@ README on the stable branch.
   against the reply, checking parsed Blocks for meaning (after the sanitizers),
   and naming *why* a Chomusuke answer was unusable (refusal, truncation, wrong
   job, prose).
-- **NPC Bank** — scene relevance for dossiers and image tags, a gate on creating
-  a dossier for a background extra, verification of dossier changes, and a
-  portrait/outfit-tag review before ComfyUI.
+- **NPC Bank** — two-stage ranking: one cheap JEV shortlist over the whole bank
+  (name + one line each), then full-dossier ranking of up to five survivors for
+  dossiers and image tags. The old keyword shortlist is only the fallback. Plus a
+  gate on creating a dossier for a background extra, verification of dossier
+  changes, and a portrait/outfit-tag review before ComfyUI.
 - **Story Director** — whether the arc is complete, stalled or redirected
   (combined with the tracker and frequency rules), and a check on a generated
   directive before it is saved.

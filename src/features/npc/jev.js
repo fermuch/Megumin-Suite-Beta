@@ -5,7 +5,7 @@
 // is ON and the policy was confident; merges and deletions stay user/code-owned.
 // ────────────────────────────────────────────────────────────────────────────
 
-import { jevJudge, jevRoute } from "../../jev/index.js";
+import { jevJudge, jevRoute, hashText } from "../../jev/index.js";
 import { featureMode } from "../../jev/settings.js";
 import { localProfile } from "../../core/state.js";
 import { npcFindByName } from "./updates.js";
@@ -24,7 +24,22 @@ function candidateText(n) {
         .filter(Boolean).join(" ").slice(0, 1200);
 }
 
-/** Names present in the exchange text, plus the bank's most recent entries. */
+function briefOf(npc) {
+    return [npc.description, npc.appearance, npc.personality, npc.notes, npc.imageTags]
+        .filter(Boolean).join(" ").slice(0, 240);
+}
+
+/** The bank in roster form. Above 20 entries, names in the exchange and the most
+ *  recent fill the roster; at or below that, every NPC is judged. */
+function npcRoster(exchange) {
+    const npcs = (localProfile?.npcBank?.npcs || []).filter(n => n && n.name && !n.imageOnly);
+    const lower = String(exchange || "").toLowerCase();
+    const named = npcs.filter(n => lower.includes(String(n.name).toLowerCase()));
+    const rest = npcs.filter(n => !named.includes(n)).sort((a, b) => (b.messageIndex || 0) - (a.messageIndex || 0));
+    return [...named, ...rest].slice(0, 20);
+}
+
+/** Lexical fallback only: used when the shortlist feature is off/shadow/unsure. */
 export function npcRankCandidates(exchange) {
     const npcs = (localProfile?.npcBank?.npcs || []).filter(n => n && n.name && !n.imageOnly);
     const lower = String(exchange || "").toLowerCase();
@@ -38,12 +53,33 @@ export function npcRankCandidates(exchange) {
  * @param {string} exchange  cleaned latest exchange
  */
 export async function npcJevPrepareRanking(exchange) {
-    if (featureMode("npc.rank") === "off") { rankPlan = { key: "", active: false, conversation: [], visual: [], conflicts: [], at: 0 }; return null; }
-    const candidates = npcRankCandidates(exchange);
-    if (!candidates.length) return null;
-    const key = `${candidates.map(c => c.name).join("|")}#${String(exchange || "").slice(0, 200)}`;
+    const mode = featureMode("npc.rank");
+    if (mode === "off") { rankPlan = { key: "", active: false, conversation: [], visual: [], conflicts: [], at: 0 }; return null; }
+    const roster = npcRoster(exchange);
+    if (!roster.length) return null;
+
+    const key = `${hashText(String(exchange || ""))}#${roster.map(n => n.name).join("|")}#${featureMode("npc.shortlist")}/${mode}`;
     if (rankPlan.key === key) return rankPlan;
 
+    // Stage 1 — JEV chooses the shortlist from the whole roster. Off, shadow,
+    // failure, or an unsure answer falls back to the lexical shortlist.
+    const heuristic = npcRankCandidates(exchange).map(n => n.name);
+    const picked = await jevRoute(
+        "npc.shortlist",
+        { exchange, roster: roster.map(n => ({ name: n.name, brief: briefOf(n) })) },
+        heuristic,
+    );
+    const names = picked.route && Array.isArray(picked.route.names) ? picked.route.names.slice(0, 5) : heuristic;
+    const byName = new Map(roster.map(n => [n.name, n]));
+    const candidates = names.map(name => byName.get(name)).filter(Boolean);
+
+    if (!candidates.length) {
+        // A confident "nobody here" is a decision: no dossiers, no image tags.
+        rankPlan = { key, active: true, conversation: [], visual: [], conflicts: [], at: Date.now() };
+        return rankPlan;
+    }
+
+    // Stage 2 — full dossiers for the survivors.
     const result = await jevRoute("npc.rank", {
         exchange,
         candidates: candidates.map(c => ({ name: c.name, dossier: candidateText(c) })),

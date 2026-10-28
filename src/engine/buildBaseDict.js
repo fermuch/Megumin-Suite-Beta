@@ -834,10 +834,15 @@ export function buildBaseDict(isTokenCount = false) {
                         // replaces the keyword order for the dossiers that are
                         // sent. An empty ranking leaves the keyword order alone.
                         const npcPlan = npcJevRankPlan();
-                        if (npcPlan.active && npcPlan.conversation.length) {
-                            const byName = new Map(scoredNpcs.map(n => [n.name, n]));
-                            const ranked = npcPlan.conversation.map(name => byName.get(name)).filter(Boolean);
-                            if (ranked.length) topNpcs = ranked.slice(0, limit);
+                        if (npcPlan.active) {
+                            if (!npcPlan.conversation.length) {
+                                // The shortlist said "nobody"; do not fall back to keywords.
+                                topNpcs = [];
+                            } else {
+                                const byName = new Map(scoredNpcs.map(n => [n.name, n]));
+                                const ranked = npcPlan.conversation.map(name => byName.get(name)).filter(Boolean);
+                                if (ranked.length) topNpcs = ranked.slice(0, limit);
+                            }
                         }
                         const npcBudgetDrops = contextJevDroppedNpcNames();
                         if (npcBudgetDrops.size) topNpcs = topNpcs.filter(n => !npcBudgetDrops.has(n.name));
