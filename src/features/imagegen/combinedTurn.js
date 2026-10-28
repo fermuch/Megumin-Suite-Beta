@@ -23,6 +23,7 @@ import { localProfile } from "../../core/state.js";
 import { setActiveImageGenRequest } from "../../core/activeRequests.js";
 import { runWithChomusuke } from "../../engine/tasks.js";
 import { warnChomusuke, answerKind } from "../../engine/chomusukeNotice.js";
+import { warnUnusableAnswer } from "../../engine/jevNotice.js";
 import { meguminCleanChatHistoryText } from "../../engine/chatText.js";
 import {
     worldEnabled, worldUpdateMode, worldBeginExternalRead, worldReadInputs,
@@ -189,7 +190,7 @@ export async function runCombinedTurn(messageId, type, plan) {
     const tell = () => {
         if (alreadyTold || !missing.length) return;
         if (failure) warnChomusuke("failed", missing, { error: failure });
-        else warnChomusuke(answerKind(raw), missing);
+        else warnUnusableAnswer(raw, missing).catch(() => {});
     };
     if (!raw.trim() && missingLooks.length) releaseLookAttempts(getContext()?.chatId, missingLooks);
     // With a World prefill the answer starts inside the World block.
@@ -208,7 +209,7 @@ export async function runCombinedTurn(messageId, type, plan) {
 
     // 2. The blocks.
     if (bToken) {
-        const res = blocksFinishRead(bToken, full);
+        const res = await blocksFinishRead(bToken, full);
         if (!res.ok && !res.dropped) {
             if (combineSettings().worldFallback) blocksReadForReply(index, { force: true });
             else missing.push("blocks");
@@ -219,9 +220,9 @@ export async function runCombinedTurn(messageId, type, plan) {
 
     // 3. The notebook.
     if (nToken) {
-        const res = notebookFinishRead(nToken, full);
+        const res = await notebookFinishRead(nToken, full);
         if (!res.ok && !res.dropped) {
-            notebookRecordMissing(nToken);
+            await notebookRecordMissing(nToken);
             if (combineSettings().worldFallback) notebookReadForReply(index, { force: true });
             else missing.push("notebook");
         }

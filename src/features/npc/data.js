@@ -8,6 +8,7 @@
 import { getContext } from "../../st.js";
 import { localProfile } from "../../core/state.js";
 import { memGetCachedKeywords } from "../memory/keywords.js";
+import { npcJevRankPlan } from "./jev.js";
 import { escapeRegex } from "../../utils/regex.js";
 import { npcFields, npcFieldByRole, npcBodyFields, npcVitalsFields } from "./fields.js";
 
@@ -195,7 +196,16 @@ export function getRelevantNpcImageTags({ force = false } = {}) {
     if (scoredNpcs.length === 0) return "";
     
     scoredNpcs.sort((a, b) => b.score - a.score);
-    const topNpcs = scoredNpcs.slice(0, 3); // Grab the top 3 relevant NPCs
+    let topNpcs = scoredNpcs.slice(0, 3); // Grab the top 3 relevant NPCs
+    // docs/jev.md proposal 15: image tags follow VISUAL presence, which is not
+    // the same thing as conversational relevance. A confident ranking can drop
+    // a character who is only being remembered; an empty one leaves the old order.
+    const plan = npcJevRankPlan();
+    if (plan.active) {
+        const byName = new Map(scoredNpcs.map(n => [n.name, n]));
+        topNpcs = plan.visual.map(name => byName.get(name)).filter(Boolean).slice(0, 3);
+        if (!topNpcs.length) return "";
+    }
     
     return "**RELEVANT NPC IMAGE TAGS:**\n" + topNpcs.map(n => `[${n.name}]: ${n.tags}`).join("\n");
 }

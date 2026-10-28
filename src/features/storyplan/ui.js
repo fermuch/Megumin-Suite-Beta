@@ -6,6 +6,7 @@ import { generateQuietPrompt, getContext } from "../../st.js";
 import { extensionName } from "../../core/constants.js";
 import { localProfile } from "../../core/state.js";
 import { meguminActiveDataIdentity } from "../../core/keys.js";
+import { jevCheckDirective, directiveWarningText } from "./jev.js";
 import { syncPromptsGlobally } from "../../core/sync.js";
 import { setActiveStoryPlanRequest } from "../../core/activeRequests.js";
 import { saveProfileToMemory, saveProfileDebounced } from "../../core/profile.js";
@@ -453,6 +454,22 @@ export async function handleDirectiveGeneration(sp, btn, isEvolve) {
             // Try <directive> tags first, fall back to <plot> for backward compat
             const directiveMatch = output.match(/<directive>([\s\S]*?)<\/directive>/i) || output.match(/<plot>([\s\S]*?)<\/plot>/i);
             if (directiveMatch) {
+                // docs/jev.md proposal 20: check the directive before saving it.
+                // A rejected one stays in the box below for editing; it is never
+                // auto-regenerated or rewritten.
+                const check = await jevCheckDirective({
+                    directive: directiveMatch[1].trim(),
+                    recent: chatText,
+                    note: sp.notes || "",
+                    genre: sp.genre || "",
+                    unresolved: sp.lastTrackerState || "",
+                });
+                if (check && check.verdict !== "accept") {
+                    toastr.warning(directiveWarningText(check), "Story Director", { timeOut: 9000 });
+                    $("#sd_current_plan").val(directiveMatch[1].trim());
+                    $("#sd_btn_evolve").prop("disabled", false);
+                    return;
+                }
                 sp.currentPlan = directiveMatch[1].trim();
                 sp.planMessageIndex = (getContext().chat?.length || 1) - 1;
                 $("#sd_current_plan").val(sp.currentPlan);

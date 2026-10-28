@@ -11,6 +11,7 @@ import { getCharacterKey, meguminActiveDataIdentity } from "../../core/keys.js";
 import { showKazumaProgress } from "../../ui/progress.js";
 import { meguminCleanChatHistoryText } from "../../engine/chatText.js";
 import { memGetCachedKeywords, memStringHash } from "./keywords.js";
+import { memJevStrategyValue } from "./jev.js";
 
 // NOTE: memGetEmbedding / memUpdateCurrentQueryVector / memUpdateVaultEmbeddings removed.
 // ST's native /api/vector/* API does NOT expose raw embeddings. Embedding is done server-side
@@ -211,6 +212,16 @@ export function memBuildQueryText() {
         if (nonSystem[i].is_user) { userIdx = i; break; }
     }
     const userText = userIdx >= 0 ? clean(nonSystem[userIdx]).trim() : "";
+
+    // JEV (docs/jev.md proposal 5): a confident strategy replaces the length
+    // rule for THIS turn only. Anything else — off, shadow, unsure, failed —
+    // falls through to the rule below unchanged.
+    const strategy = memJevStrategyValue();
+    if (strategy === "skip_retrieval") return "";
+    if (strategy === "latest_user") return userText.slice(-MAX_QUERY_CHARS).trim();
+    if (strategy === "recent_exchange") {
+        return nonSystem.slice(-2).map(clean).join(" ").slice(-MAX_QUERY_CHARS).trim();
+    }
 
     const text = userText.length >= MIN_MEANINGFUL
         ? userText.slice(-MAX_QUERY_CHARS)

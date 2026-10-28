@@ -14,6 +14,7 @@
 import { getContext, generateQuietPrompt, substituteParams } from "../../st.js";
 import { runWithChomusuke } from "../../engine/tasks.js";
 import { warnChomusuke, answerKind } from "../../engine/chomusukeNotice.js";
+import { warnUnusableAnswer } from "../../engine/jevNotice.js";
 import { setActiveWorldExtractRequest } from "../../core/activeRequests.js";
 import { meguminCleanChatHistoryText } from "../../engine/chatText.js";
 import { buildBaseDict } from "../../engine/buildBaseDict.js";
@@ -96,9 +97,9 @@ export function blocksReadForReply(index, { force = false } = {}) {
             meguminScheduleBlocksRefresh();
             return false;
         }
-        const res = blocksFinishRead(token, raw);
+        const res = await blocksFinishRead(token, raw);
         // null: the worker failed and has said so already.
-        if (!res.ok && !res.dropped && raw !== null) warnChomusuke(answerKind(raw), ["blocks"]);
+        if (!res.ok && !res.dropped && raw !== null) await warnUnusableAnswer(raw, ["blocks"]);
         meguminScheduleBlocksRefresh();
         return res.ok;
     };

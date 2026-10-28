@@ -14,6 +14,8 @@ import { localProfile } from "../../core/state.js";
 import { setActiveImageGenRequest } from "../../core/activeRequests.js";
 import { runWithChomusuke } from "../../engine/tasks.js";
 import { warnChomusuke, answerKind } from "../../engine/chomusukeNotice.js";
+import { warnUnusableAnswer } from "../../engine/jevNotice.js";
+import { jevImageShouldSkip, jevCheckImagePrompt, exchangeAt } from "./jev.js";
 import { meguminScheduleBlocksRefresh } from "../blocks/chat.js";
 import { igGenerateWithComfy } from "./comfy.js";
 import { insertAtSlot } from "./slot.js";
@@ -90,6 +92,12 @@ export async function igAutoImageForReply(messageId, type, writePrompt, prepare 
     if (!message || message.is_user || message.is_system) return;
     if (!dueNow(ig, chat)) return;
 
+    // docs/jev.md proposal 28: in conditional mode a confident "nothing
+    // photo-worthy happened" skips the writer entirely — no prompt call, no
+    // placeholder, no render. Off, shadow, or an uncertain answer leaves the
+    // current conditional writer in charge, its own NONE answer included.
+    if ((ig.triggerMode || "always") === "conditional" && await jevImageShouldSkip(index)) return;
+
     const inline = (ig.injectMode || "new_msg") === "inline";
     const id = `kazuma-img-${Date.now()}-auto`;
 
@@ -127,7 +135,21 @@ export async function igAutoImageForReply(messageId, type, writePrompt, prepare 
         if (inline) await removePlaceholder(id);
         // NONE is an answer. null without an error: the worker said so already.
         if (failure) warnChomusuke("failed", ["imageGen"], { error: failure });
-        else if (!prompt && raw !== null) warnChomusuke(answerKind(raw), ["imageGen"]);
+        else if (!prompt && raw !== null) await warnUnusableAnswer(raw, ["imageGen"]);
+        return;
+    }
+
+    // docs/jev.md proposal 29: a well-formed prompt can still describe the
+    // wrong person or yesterday's outfit. Check before paying for a render.
+    // The prompt is never rewritten; a rejected one simply is not sent.
+    const verdict = await jevCheckImagePrompt({ prompt, reply: exchangeAt(index) });
+    if (!verdict.ok) {
+        if (inline) await removePlaceholder(id);
+        toastr.warning(
+            `This image prompt was not sent: ${verdict.issues.join(", ")}. Edit the scene or the outfit and try again, or turn the check off in Settings → JEV.`,
+            "Megumin Suite",
+            { timeOut: 9000 },
+        );
         return;
     }
 

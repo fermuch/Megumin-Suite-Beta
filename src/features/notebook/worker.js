@@ -12,6 +12,7 @@
 import { generateQuietPrompt, substituteParams } from "../../st.js";
 import { runWithChomusuke } from "../../engine/tasks.js";
 import { warnChomusuke, answerKind } from "../../engine/chomusukeNotice.js";
+import { warnUnusableAnswer } from "../../engine/jevNotice.js";
 import { setActiveWorldExtractRequest } from "../../core/activeRequests.js";
 import {
     notebookViaChomusuke, notebookBeginRead, notebookReadNotes, notebookFinishRead, notebookRecordMissing, notebookAbandonRead
@@ -74,11 +75,11 @@ export function notebookReadForReply(index, { force = false } = {}) {
             meguminScheduleBlocksRefresh();
             return false;
         }
-        const res = notebookFinishRead(token, raw);
+        const res = await notebookFinishRead(token, raw);
         if (!res.ok && !res.dropped) {
-            notebookRecordMissing(token);
+            await notebookRecordMissing(token);
             // null: the worker failed and has said so already.
-            if (raw !== null) warnChomusuke(answerKind(raw), ["notebook"]);
+            if (raw !== null) await warnUnusableAnswer(raw, ["notebook"]);
         }
         meguminScheduleBlocksRefresh();
         return res.ok;

@@ -25,6 +25,7 @@ import {
     NATURAL_SYSTEM, renderNaturalPrompt, parseNaturalBlocks, matchScanToTargets,
     OUTFIT_SYSTEM, renderOutfitTagsPrompt, parseOutfitBlocks, outfitHash
 } from "./looksCore.js";
+import { npcJevFilterOutfitTags } from "../../npc/jev.js";
 
 const esc = v => String(v == null ? "" : v)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -350,7 +351,10 @@ export function refreshOutfitTags() {
     outfitRefresh = (async () => {
         const raw = await ask(OUTFIT_SYSTEM, renderOutfitTagsPrompt(stale.map(m => ({ name: m.name, outfit: m.outfitText }))));
         if (getContext()?.chatId !== chatAtStart) return 0;
-        return storeOutfitTags(stale, raw);
+        // docs/jev.md proposal 18: reject tags the outfit does not support
+        // before they are cached or sent.
+        const checked = await npcJevFilterOutfitTags(stale, raw);
+        return storeOutfitTags(stale, checked);
     })().catch(e => { console.error("[Megumin-Suite] Outfit tags failed", e); return 0; })
         .finally(() => { outfitRefresh = null; });
     return outfitRefresh;

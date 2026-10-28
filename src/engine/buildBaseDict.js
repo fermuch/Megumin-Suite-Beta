@@ -24,6 +24,10 @@ import { imageInjectionNpcTags, imageV2InlineInstruction, imageV2InlineSplit, im
 import { npcBuildDossierPrompt, npcBuildUpdatePrompt, npcBuildDossierPromptSplit, npcBuildUpdatePromptSplit } from "../features/npc/fields.js";
 import { memGetCachedKeywords } from "../features/memory/keywords.js";
 import { memGetRelevantVaultEntries } from "../features/memory/index.js";
+import { memJevConflictIds } from "../features/memory/jev.js";
+import { npcJevRankPlan } from "../features/npc/jev.js";
+import { diceJevResolve, diceJevInstruction, diceJevActive } from "../features/blocks/jevDice.js";
+import { contextJevDroppedMemoryIds, contextJevDroppedNpcNames } from "./contextJev.js";
 import { meguminRollD20s } from "../utils/dice.js";
 import { meguminOverridableSlots, meguminSlotIsLive, meguminModuleTrigger, meguminSlotByTrigger } from "../../data/slots.js";
 import { thinkingSection, formattingSection, bannedSection, reminderSection, thisTurnSection } from "./presetSections.js";
@@ -328,13 +332,25 @@ export function buildBaseDict(isTokenCount = false) {
         const item = hardcodedLogic.addons.find(a => a.id === aId);
         if (!item || !item.rolls || !dict[item.trigger]) return;
         const rolls = meguminRollD20s(item.rolls);
+        // docs/jev.md proposal 26: for the player-only add-on, the FIRST number
+        // is the resolved primary attempt (code rolled it), and is not handed to
+        // the model as a free choice. Later attempts keep the old contract.
+        let numbers = rolls;
+        let resolved = null;
+        if (aId === "dice" && diceJevActive()) {
+            resolved = diceJevResolve(rolls[0]);
+            if (resolved) numbers = rolls.slice(1);
+        }
         // The V11 wording while the rules are the built-in ones; your own
         // rules are kept, pointed at <turn_notes>.
         dict["[[dice_rules]]"] = sameText(dict[item.trigger], item.content)
             ? (aId === "dice_all" ? DICE_RULES_EVERYONE : DICE_RULES_PLAYER)
             : dict[item.trigger].replace("[[dice_rolls]]", DICE_ROLLS_POINTER);
-        diceRollsLine = diceTurnLine(rolls);
-        dict[item.trigger] = dict[item.trigger].replace("[[dice_rolls]]", rolls.join(", "));
+        diceRollsLine = diceTurnLine(numbers);
+        dict[item.trigger] = dict[item.trigger].replace("[[dice_rolls]]", numbers.length ? numbers.join(", ") : "none left this turn");
+        if (resolved) {
+            dict[item.trigger] = dict[item.trigger].replace(/<dice_rules>/, `<dice_rules>\n${diceJevInstruction(resolved)}`);
+        }
     });
 
     // Wipe main persona for V6, V7, V8, and V9
@@ -616,7 +632,8 @@ export function buildBaseDict(isTokenCount = false) {
         // updateLiveTokenCount drops [[long-Memory]] via excludeKeys anyway,
         // so the scan only ever fed a value that got thrown away
         if (!isTokenCount && mem.longTermVault && mem.longTermVault.length > 0) {
-            const retrieved = memGetRelevantVaultEntries();
+            const budgetDrops = contextJevDroppedMemoryIds();
+            const retrieved = memGetRelevantVaultEntries().filter(m => !budgetDrops.has(m.id));
             if (retrieved.length > 0) {
                 // Feed these to the model oldest-first so the archives read as a timeline instead of a relevance ranking.
                 // Sort a COPY - the array can be the live semantic match list or the retrieval cache, never reorder it in place!
@@ -626,10 +643,15 @@ export function buildBaseDict(isTokenCount = false) {
                     return (Number.isFinite(aStart) ? aStart : 0) - (Number.isFinite(bStart) ? bStart : 0);
                 });
                 let longXML = "<retrieved_archives>\n";
+                const disputed = memJevConflictIds();
                 ordered.forEach(m => {
                     const dateStr = new Date(m.timestamp).toLocaleString();
                     const content = m.text || m.summary || "";
-                    longXML += `<archive_memory time="${dateStr}">\n[Msg ${m.id}]:\n${content}\n</archive_memory>\n`;
+                    // A memory the policy flagged as contradicted or superseded is
+                    // marked, not hidden: the story model should see the conflict
+                    // instead of two facts silently presented as equally current.
+                    const flag = disputed.has(m.id) || (m.jev && m.jev.conflict) ? ' conflict="disputed"' : "";
+                    longXML += `<archive_memory time="${dateStr}"${flag}>\n[Msg ${m.id}]:\n${content}\n</archive_memory>\n`;
                 });
                 longXML += "</retrieved_archives>";
 
@@ -807,7 +829,18 @@ export function buildBaseDict(isTokenCount = false) {
                         
                         // Enforce the Injection Limit chosen in the UI
                         const limit = localProfile.npcBank.injectionLimit || 3;
-                        const topNpcs = scoredNpcs.slice(0, limit);
+                        let topNpcs = scoredNpcs.slice(0, limit);
+                        // docs/jev.md proposal 15: a confident relevance ranking
+                        // replaces the keyword order for the dossiers that are
+                        // sent. An empty ranking leaves the keyword order alone.
+                        const npcPlan = npcJevRankPlan();
+                        if (npcPlan.active && npcPlan.conversation.length) {
+                            const byName = new Map(scoredNpcs.map(n => [n.name, n]));
+                            const ranked = npcPlan.conversation.map(name => byName.get(name)).filter(Boolean);
+                            if (ranked.length) topNpcs = ranked.slice(0, limit);
+                        }
+                        const npcBudgetDrops = contextJevDroppedNpcNames();
+                        if (npcBudgetDrops.size) topNpcs = topNpcs.filter(n => !npcBudgetDrops.has(n.name));
                         
                         let npcXML = "<retrieved_npcs>\n";
                         topNpcs.forEach(n => { npcXML += `<${n.name}>\n${npcBuildTextFromData(n)}\n</${n.name}>\n\n`; });

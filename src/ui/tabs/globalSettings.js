@@ -11,6 +11,7 @@ import { cancelDebounce } from "../../st.js";
 import { suiteEnabled, setSuiteEnabled } from "../../core/power.js";
 import { BG_JOBS, bgJobWanted } from "../../engine/bgPromptsCore.js";
 import { openBackgroundLog } from "../../engine/bgPrompts.js";
+import { appendJevSettings } from "../../jev/ui.js";
 
 // The version on the about card. One place, so it cannot fall out of step with
 // itself the way "v9" did once V10 shipped.
@@ -144,6 +145,8 @@ export function renderGlobalSettings(c) {
             <div class="ps-switch" style="${gs.loreInTasks ? 'background: #a855f7;' : ''}"></div>
         </div>
     `);
+
+    appendJevSettings($content);
 
     // ── DATA ────────────────────────────────────────────────────────────────
     $content.append(`<div class="wstyle-section-head gold" style="margin-top:8px;"><i class="fa-solid fa-floppy-disk"></i> Data</div>`);

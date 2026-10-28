@@ -13,6 +13,7 @@ import { engineKeepsNotebook } from "../core/engines.js";
 import { hardcodedLogic } from "../../data/database.js";
 import { runWithChomusuke } from "../engine/tasks.js";
 import { warnChomusuke, answerKind } from "../engine/chomusukeNotice.js";
+import { warnUnusableAnswer } from "../engine/jevNotice.js";
 import { setActiveWorldExtractRequest } from "../core/activeRequests.js";
 import { localProfile } from "../core/state.js";
 import { createStateStore } from "./store.js";
@@ -27,7 +28,8 @@ import {
     notebookPhase, renderNotebookSetup, renderNotebookForPrompt, renderNotebookUpdateRules, notebookTurnLabeler
 } from "./modules/notebook/render.js";
 import { liveTruths } from "./modules/notebook/model.js";
-import { parseNotebook } from "./modules/notebook/parse.js";
+import { parseNotebook, storyProse } from "./modules/notebook/parse.js";
+import { jevFilterWorldParsed, jevFilterNotebookParsed, jevCheckSecretLeaks, jevVerifyBlock } from "./jev.js";
 import {
     replyWroteNotebookChanges, notebookAnswerBlock, joinNotebookRead, notebookReadPart, parseNotebookRead,
     replyWroteTruths, notebookSetupAnswerBlock
@@ -416,11 +418,13 @@ export function worldExtractMessage(index, { force = false } = {}) {
         let cleaned = String(out || "").replace(/<think\b[^>]*>[\s\S]*?(<\/think\s*>|$)/gi, "").trim();
         if (cleaned && req && !/<World_(State|Update)\b/i.test(cleaned)) cleaned = req.prefill + cleaned;
         const parsed = cleaned ? worldModule.parse(cleaned) : null;
-        stateStore.recordMessage(at, { source: "sidemodel", expect: true, moduleIds: ["world"], swipe, parsed: parsed || null, raw: cleaned });
+        const checked = parsed ? await jevFilterWorldParsed(parsed, cleaned) : null;
+        if (checked && checked.held.length) reportHeldChanges(checked.held);
+        stateStore.recordMessage(at, { source: "sidemodel", expect: true, moduleIds: ["world"], swipe, parsed: checked ? checked.parsed : (parsed || null), raw: cleaned });
         if (!parsed) {
             // null without an error: the worker failed and has said so already.
             if (failure) warnChomusuke("failed", ["worldState"], { error: failure });
-            else if (out !== null) warnChomusuke(answerKind(out), ["worldState"]);
+            else if (out !== null) await warnUnusableAnswer(out, ["worldState"]);
         } else if (parsed.skipped.length) {
             console.debug(`[Megumin-Suite] World State (side model): lines not understood in message ${at}:`, parsed.skipped);
         }
@@ -695,15 +699,54 @@ function notebookInPlay() {
 // "missing" anything: nothing is recorded for it.
 // A reply Chomusuke already read keeps Chomusuke's lines when its text is
 // recorded again (an edit, a continue): only the reply's own part is re-read.
-function notebookRecord(index) {
+function notebookCurrentTruths() {
+    try { return liveTruths(stateStore.getStateAt("notebook", Number.POSITIVE_INFINITY)); } catch (e) { return []; }
+}
+
+function reportHeldChanges(held) {
+    console.debug("[Megumin-Suite] Parsed changes not applied because the reply did not support them:", held);
+    if (typeof toastr !== "undefined") {
+        toastr.info(
+            `${held.length} parsed change${held.length === 1 ? " was" : "s were"} not applied: JEV could not confirm the reply supported ${held.length === 1 ? "it" : "them"}. The Decision Inspector has the details.`,
+            "Megumin Suite",
+        );
+    }
+}
+
+function reportSecretLeaks(leaks) {
+    if (!leaks.length) return;
+    console.debug("[Megumin-Suite] Notebook: the reply appears to use knowledge a character was never given.", leaks);
+    if (typeof toastr !== "undefined") {
+        toastr.warning(
+            `A character may have used a secret they never learned (${leaks.length} flagged). Nothing was changed; check the Notebook's Hidden-from lists if it keeps happening.`,
+            "Megumin Suite",
+        );
+    }
+}
+
+/** Applies the Notebook's semantic checks to a batch of parsed ops. */
+async function jevCheckNotebook(parsed, prose) {
+    const filtered = await jevFilterNotebookParsed(parsed, prose);
+    if (filtered.changed.length) {
+        console.debug("[Megumin-Suite] Notebook clue decisions updated by JEV:", filtered.changed);
+    }
+    return filtered.parsed;
+}
+
+async function notebookRecord(index) {
     const msg = adapter.getChat()[index];
     if (!msg || msg.is_user || msg.is_system) return;
     const uid = msg.extra?.megumin_uid;
     const swipe = typeof msg.swipe_id === "number" ? msg.swipe_id : 0;
     const e = uid ? stateStore.getEntryFor("notebook", uid, swipe) : null;
     const part = e && e.source === "sidemodel" ? notebookReadPart(e.raw) : "";
-    if (part) { fileNotebookRead(index, swipe, String(msg.mes || ""), part); return; }
-    stateStore.recordMessage(index, { moduleIds: ["notebook"] });
+    if (part) { await fileNotebookRead(index, swipe, String(msg.mes || ""), part); return; }
+    const text = String(msg.mes || "");
+    const base = notebookModule.parse(text);
+    const filtered = await jevCheckNotebook(base, storyProse(text));
+    stateStore.recordMessage(index, { moduleIds: ["notebook"], parsed: filtered });
+    const leaks = await jevCheckSecretLeaks(storyProse(text), notebookCurrentTruths());
+    reportSecretLeaks(leaks);
 }
 
 // ── The notebook read (plan 010, phase 5) ──
@@ -713,9 +756,12 @@ function notebookRecord(index) {
 
 const pendingNotebook = new Set();
 
-function fileNotebookRead(at, swipe, replyText, block) {
-    const parsed = parseNotebookRead(replyText, block) || { kind: "delta", ops: [] };
+async function fileNotebookRead(at, swipe, replyText, block) {
+    const base = parseNotebookRead(replyText, block) || { kind: "delta", ops: [] };
+    const parsed = await jevCheckNotebook(base, storyProse(replyText));
     stateStore.recordMessage(at, { source: "sidemodel", moduleIds: ["notebook"], swipe, parsed, raw: joinNotebookRead(replyText, block) });
+    const leaks = await jevCheckSecretLeaks(storyProse(replyText), notebookCurrentTruths());
+    reportSecretLeaks(leaks);
 }
 
 // What Chomusuke does for a reply: "read" it against the live truths, write
@@ -776,7 +822,7 @@ export function notebookReadNotes(token) {
  * Files Chomusuke's answer with the reply's own notebook lines.
  * @returns {{ ok: boolean, dropped: boolean }}
  */
-export function notebookFinishRead(token, raw) {
+export async function notebookFinishRead(token, raw) {
     pendingNotebook.delete(token.key);
     const at = findTokenMessage(token);
     if (at < 0) {
@@ -786,17 +832,20 @@ export function notebookFinishRead(token, raw) {
     }
     const ans = token.kind === "setup" ? notebookSetupAnswerBlock(raw) : notebookAnswerBlock(raw);
     if (!ans) { stateChangedHook(); return { ok: false, dropped: false }; }
-    fileNotebookRead(at, token.swipe, token.text, ans.block);
+    await fileNotebookRead(at, token.swipe, token.text, ans.block);
     stateChangedHook();
     return { ok: true, dropped: false };
 }
 
 /** No usable answer: the reply's own lines stay, and the card offers Read again. */
-export function notebookRecordMissing(token) {
+export async function notebookRecordMissing(token) {
     pendingNotebook.delete(token.key);
     const at = findTokenMessage(token);
     if (at < 0) { stateChangedHook(); return; }
-    stateStore.recordMessage(at, { source: "sidemodel", expect: true, moduleIds: ["notebook"], swipe: token.swipe, parsed: parseNotebook(token.text) });
+    stateStore.recordMessage(at, {
+        source: "sidemodel", expect: true, moduleIds: ["notebook"], swipe: token.swipe,
+        parsed: await jevCheckNotebook(parseNotebook(token.text), storyProse(token.text)),
+    });
     stateChangedHook();
 }
 
@@ -806,12 +855,12 @@ export function notebookAbandonRead(token) {
     stateChangedHook();
 }
 
-function notebookOnReceived(messageId) {
+async function notebookOnReceived(messageId) {
     if (!notebookEnabled() || !adapter.getMeta()) return;
     const chat = adapter.getChat();
     const index = typeof messageId === "number" ? messageId : chat.length - 1;
     stateStore.reconcile();
-    notebookRecord(index);
+    await notebookRecord(index);
 }
 
 // ── Bonds, Sheet, Inner Chatter, Story Tracker (plan 008) ────────────────
@@ -976,7 +1025,7 @@ export function blocksReadNotes(token, exchangeText = "") {
  * "missing" note when the answer had none for it.
  * @returns {{ ok: boolean, dropped: boolean, found: string[] }}
  */
-export function blocksFinishRead(token, raw) {
+export async function blocksFinishRead(token, raw) {
     pendingBlocks.delete(token.key);
     const at = findTokenMessage(token);
     if (at < 0) {
@@ -986,11 +1035,29 @@ export function blocksFinishRead(token, raw) {
     }
     const cleaned = cleanWorkerAnswer(raw);
     const found = [];
+    const rejected = [];
     for (const id of token.ids) {
         const block = blockTextIn(cleaned, BLOCK_ROUTE_TAGS[id]);
         const parsed = block ? STAT_MODULE_DEFS[id].parse(block) : null;
-        if (parsed) found.push(id);
-        stateStore.recordMessage(at, { source: "sidemodel", expect: true, moduleIds: [id], swipe: token.swipe, parsed: parsed || null, raw: block });
+        // docs/jev.md proposal 13: a structurally valid card still has to mean
+        // what it claims. A rejected card is filed as missing, which is the
+        // existing "fall back to prose / Read again" path — never rewritten.
+        let keep = parsed;
+        if (parsed) {
+            const verdict = await jevVerifyBlock(id, block, token.text);
+            if (!verdict.ok) {
+                keep = null;
+                rejected.push(`${id}: ${verdict.issues.join(", ")}`);
+            }
+        }
+        if (keep) found.push(id);
+        stateStore.recordMessage(at, { source: "sidemodel", expect: true, moduleIds: [id], swipe: token.swipe, parsed: keep || null, raw: block });
+    }
+    if (rejected.length) {
+        console.debug("[Megumin-Suite] Blocks held back by JEV:", rejected);
+        if (typeof toastr !== "undefined") {
+            toastr.warning(`A card was not used: ${rejected.join(" · ")}. The reply's prose still stands; Read again after editing the reply or turning the check off.`, "Megumin Suite");
+        }
     }
     stateChangedHook();
     return { ok: found.length > 0, dropped: false, found };
@@ -1073,9 +1140,9 @@ function repliesUpdate() {
  * @param {{ skipSideRead?: boolean }} [opts] skipSideRead: the combined World State +
  *   image call reads this reply instead of a separate Chomusuke read.
  */
-export function stateOnMessageReceived(messageId, type, { skipSideRead = false } = {}) {
+export async function stateOnMessageReceived(messageId, type, { skipSideRead = false } = {}) {
     statsOnReceived(messageId);
-    notebookOnReceived(messageId);
+    await notebookOnReceived(messageId);
     if (!repliesUpdate() || !adapter.getMeta()) return false;
     const chat = adapter.getChat();
     const index = typeof messageId === "number" ? messageId : chat.length - 1;
@@ -1083,18 +1150,34 @@ export function stateOnMessageReceived(messageId, type, { skipSideRead = false }
     if (!msg || msg.is_user || msg.is_system) return false;
     stateStore.reconcile();
     const mode = worldUpdateMode();
+    const text = String(msg.mes || "");
+
+    // docs/jev.md proposal 11: verify the reply's own block against the reply
+    // before it is filed. A held change is removed from the parse — never
+    // rewritten, never replaced with something JEV made up. Off, shadow, or an
+    // unavailable provider leaves the parse exactly as it was.
+    const own = worldModule.parse(text);
+    let ownParsed;
+    if (own) {
+        const checked = await jevFilterWorldParsed(own, text);
+        ownParsed = checked.parsed;
+        if (checked.held.length) reportHeldChanges(checked.held);
+    }
+
     if (mode === "sidemodel") {
         // A reply that wrote its own block anyway is taken as it is; otherwise
         // the side model reads it (not awaited: the chat must not wait on it).
-        if (worldModule.parse(String(msg.mes || ""))) {
-            stateStore.recordMessage(index, { moduleIds: ["world"] });
+        if (own) {
+            stateStore.recordMessage(index, { moduleIds: ["world"], parsed: ownParsed });
             return true;
         }
         if (!NOT_A_REPLY.has(type) && !skipSideRead) worldExtractMessage(index, { force: type === "continue" });
         return false;
     }
     const expect = mode === "inline" && !NOT_A_REPLY.has(type);
-    const { recorded } = stateStore.recordMessage(index, { expect, moduleIds: ["world"] });
+    const { recorded } = stateStore.recordMessage(index, own
+        ? { expect, moduleIds: ["world"], parsed: ownParsed }
+        : { expect, moduleIds: ["world"] });
     for (const e of recorded) {
         if (e.parsed.skipped.length) console.debug(`[Megumin-Suite] World State: lines not understood in message ${index}:`, e.parsed.skipped);
     }

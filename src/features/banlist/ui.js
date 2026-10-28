@@ -3,6 +3,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 
 import { localProfile } from "../../core/state.js";
+import { countOccurrences, jevTriageBanCandidate } from "./jev.js";
 import { syncPromptsGlobally } from "../../core/sync.js";
 import { saveProfileToMemory, saveProfileDebounced } from "../../core/profile.js";
 import { DEFAULT_PROMPTS } from "../../prompts/index.js";
@@ -123,6 +124,16 @@ export function renderBanList(c) {
             </div>
         </div>
         <div id="ps_banlist_container" class="mtab-card-list" style="min-height: 50px; padding: 10px; border: 1px dashed var(--border-color); border-radius: 10px; margin-bottom: 16px;"></div>
+
+        <!-- docs/jev.md proposal 25: candidates JEV was not sure about wait here -->
+        <div id="ps_banlist_review_wrap" style="display: none; margin-bottom: 16px;">
+            <div class="wstyle-section-head blue" style="margin-bottom:0;"><i class="fa-solid fa-lightbulb"></i> Suggested phrases</div>
+            <div class="mtab-callout blue" style="margin: 6px 0;">
+                <i class="fa-solid fa-circle-info"></i>
+                <span>These repeat, but banning them might hurt the story. Add the ones you want gone; Reject keeps the rest.</span>
+            </div>
+            <div id="ps_banlist_review" class="mtab-card-list" style="min-height: 40px; padding: 10px; border: 1px dashed var(--border-color); border-radius: 10px;"></div>
+        </div>
         
         <!-- NEW DEDICATED CONTAINER FOR THE EDITOR -->
         <div id="ban_editor_container" style="margin-bottom: 16px;"></div>
@@ -180,7 +191,40 @@ export function renderBanList(c) {
         });
         // Update header badge dynamically
         $("#ban_header_badge").html(`<i class="fa-solid fa-ban" style="font-size:0.6rem;"></i> ${localProfile.banList.length} Banned`);
-    }; renderTags();
+    };
+
+    // docs/jev.md proposal 25: uncertain candidates wait here for Add / Reject.
+    const renderBanReview = () => {
+        const list = Array.isArray(localProfile.banListReview) ? localProfile.banListReview : [];
+        const $wrap = $("#ps_banlist_review_wrap");
+        const $box = $("#ps_banlist_review");
+        $box.empty();
+        if (!list.length) { $wrap.hide(); return; }
+        $wrap.show();
+        list.forEach((item, i) => {
+            const $row = $(`<div style="display:flex; gap:8px; align-items:center; justify-content:space-between; padding:4px 0;"></div>`);
+            const $label = $(`<span><b></b> <small style="color:var(--text-muted);"></small></span>`);
+            $label.find("b").text(item.phrase);
+            $label.find("small").text(`(${item.occurrences}×)`);
+            const $buttons = $(`<span style="display:flex; gap:6px;"></span>`);
+            $buttons.append($(`<button type="button" class="menu_button" style="width:auto;margin:0;">Add</button>`).on("click", () => {
+                if (!localProfile.banList.includes(item.phrase)) localProfile.banList.push(item.phrase);
+                localProfile.banListReview.splice(i, 1);
+                saveProfileToMemory();
+                renderTags();
+                renderBanReview();
+            }));
+            $buttons.append($(`<button type="button" class="menu_button" style="width:auto;margin:0;">Reject</button>`).on("click", () => {
+                localProfile.banListReview.splice(i, 1);
+                saveProfileToMemory();
+                renderBanReview();
+            }));
+            $row.append($label, $buttons);
+            $box.append($row);
+        });
+    };
+    renderTags();
+    renderBanReview();
 
     $("#ps_btn_add_ban").on("click", () => {
         const val = $("#ps_manual_ban_input").val().trim();
@@ -239,9 +283,26 @@ export function renderBanList(c) {
         let rawResponse = await runWithChomusuke("banList", () => analyzeSlopDirectly(chatText));
         if (rawResponse) {
             const newPhrases = rawResponse.split(/[,*\n-]/).map(t => t.trim().replace(/['"\[\]\.]/g, '')).filter(t => t.length > 3);
+            if (!localProfile.banListReview) localProfile.banListReview = [];
             let addedCount = 0;
-            newPhrases.forEach(p => { if (!localProfile.banList.includes(p)) { localProfile.banList.push(p); addedCount++; } });
-            if (addedCount > 0) { saveProfileToMemory(); renderTags(); toastr.success(`Caught and banned ${addedCount} repetitive phrases!`); } else { toastr.info("No new repetitive phrases found."); }
+            for (const phrase of newPhrases) {
+                if (localProfile.banList.includes(phrase)) continue;
+                // Code counts; JEV only judges a phrase that really repeats.
+                const occurrences = countOccurrences(chatText, phrase);
+                if (occurrences < 2) continue;
+                const action = await jevTriageBanCandidate({ phrase, occurrences, sample: chatText.slice(0, 2000) });
+                if (action === "ban") {
+                    localProfile.banList.push(phrase);
+                    addedCount++;
+                } else if (action === "review" && !localProfile.banListReview.some(r => r.phrase === phrase)) {
+                    localProfile.banListReview.push({ phrase, occurrences });
+                }
+            }
+            saveProfileToMemory();
+            renderTags();
+            renderBanReview();
+            if (addedCount > 0) toastr.success(`Caught and banned ${addedCount} repetitive phrase${addedCount === 1 ? "" : "s"}!`);
+            else if (!(localProfile.banListReview || []).length) toastr.info("No new repetitive phrases found.");
         }
         $(this).prop("disabled", false).html(`<i class="fa-solid fa-radar"></i> Analyze Chat History`);
     });

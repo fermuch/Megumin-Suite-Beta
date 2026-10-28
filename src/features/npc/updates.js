@@ -106,7 +106,7 @@ function findMatchingLine(lines, needle) {
 
 // ── Applying ────────────────────────────────────────────────────────────────
 
-function npcFindByName(name) {
+export function npcFindByName(name) {
     const bank = localProfile && localProfile.npcBank;
     if (!bank || !Array.isArray(bank.npcs)) return null;
     const want = String(name || "").trim().toLowerCase();

@@ -16,6 +16,7 @@ import { KAZUMA_PLACEHOLDERS } from "../../../data/image_data.js";
 import { meguminScheduleBlocksRefresh } from "../blocks/chat.js";
 import { makeComfyClientId, openComfyProgressSocket } from "./comfyProgress.js";
 import { comfyBase } from "./comfyUrl.js";
+import { jevReviewRenderedImage } from "./jev.js";
 
 // -------------------------------------------------------------
 // STAGE 8 HELPER FUNCTIONS
@@ -557,6 +558,15 @@ export async function igGenerateWithComfy(positivePrompt, target = null) {
                             base64Clean = await new Promise((res) => { const img = new Image(); img.src = base64Raw; img.onload = () => { const cvs = document.createElement('canvas'); cvs.width = img.width; cvs.height = img.height; cvs.getContext('2d').drawImage(img, 0, 0); res(cvs.toDataURL("image/jpeg", 0.9)); }; img.onerror = () => res(base64Raw); });
                             format = "jpeg";
                         }
+
+                        // docs/jev.md proposal 30 (experimental, off by default):
+                        // review the render itself and say what looks wrong. It is
+                        // never rejected, never regenerated, and never hidden.
+                        jevReviewRenderedImage(finalPrompt, base64Clean).then(result => {
+                            if (result && !result.ok && typeof toastr !== "undefined") {
+                                toastr.warning(`The rendered image may be off: ${result.issues.join(", ")}. It is in the chat as usual.`, "Megumin Suite");
+                            }
+                        }).catch(() => {});
 
                         // Insert to Chat
                         if (!igResolveTarget()) {

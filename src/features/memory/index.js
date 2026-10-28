@@ -31,6 +31,7 @@ import { runWithChomusuke } from "../../engine/tasks.js";
 import { warnChomusuke } from "../../engine/chomusukeNotice.js";
 import { suiteEnabled } from "../../core/power.js";
 import { memGetCachedKeywords, memExtractKeywords, memStringHash } from "./keywords.js";
+import { memJevApplyPlan, memJevSkipRetrieval, memJevVerifySummary, memJevTagArchive } from "./jev.js";
 import {
     memGetCollectionId, memInsertToVectorDB, memDeleteFromVectorDB,
     memUpdateSemanticQuery, memUpdateSemanticQueryDebounced, currentSemanticMatches,
@@ -960,6 +961,7 @@ export async function memProcessPendingChunks(isAuto = false) {
     const newlyAddedBypassedVaultChunks = [];
     let bypassedCount = 0;
     let emptySummaries = 0;
+    let reviewHeld = 0;
 
     try {
         const totalChunks = chunksToProcess.length;
@@ -990,6 +992,7 @@ export async function memProcessPendingChunks(isAuto = false) {
                 };
                 mem.longTermVault.push(newVaultChunk);
                 newlyAddedBypassedVaultChunks.push(newVaultChunk);
+                memJevTagArchive(newVaultChunk, mem.longTermVault).catch(() => {});
                 changesMade = true;
                 bypassedCount++;
                 chunksSinceLastSave++;
@@ -1020,6 +1023,25 @@ export async function memProcessPendingChunks(isAuto = false) {
             summaryResult = summaryResult.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
 
             if (summaryResult) {
+                // docs/jev.md proposal 7: a summary the prose does not support
+                // must not become canonical long-term context. JEV never rewrites
+                // it; the verdict only decides where it goes. Unavailable, off,
+                // shadow, or unsure all return "accept" — the current path.
+                const verified = await memJevVerifySummary({ source: chunkData.text, summary: summaryResult });
+                if (verified.verdict === "review") {
+                    reviewHeld++;
+                    continue;
+                }
+                if (verified.verdict === "raw_source") {
+                    if (!mem.longTermVault) mem.longTermVault = [];
+                    const rawChunk = { id: chunkData.id, text: chunkData.text, timestamp: Date.now() };
+                    mem.longTermVault.push(rawChunk);
+                    newlyAddedBypassedVaultChunks.push(rawChunk);
+                    memJevTagArchive(rawChunk, mem.longTermVault).catch(() => {});
+                    changesMade = true;
+                    chunksSinceLastSave++;
+                    continue;
+                }
                 if (!mem.shortTermChunks) mem.shortTermChunks = [];
                 mem.shortTermChunks.push({
                     id: chunkData.id,
@@ -1035,6 +1057,12 @@ export async function memProcessPendingChunks(isAuto = false) {
 
         // Once for the run, not per chunk. Those messages stay in the chat as they are.
         if (emptySummaries > 0) warnChomusuke("empty", ["memory"]);
+        if (reviewHeld > 0) {
+            toastr.warning(
+                `${reviewHeld} summary${reviewHeld === 1 ? " was" : "ies were"} held back: JEV could not confirm the source supported ${reviewHeld === 1 ? "it" : "them"}. Nothing was filed, so that part of the chat will be summarised again next run. Turn the feature off in Settings → JEV to accept summaries as before.`,
+                "Megumin Suite",
+            );
+        }
 
         // Show single summary toast for vault bypass instead of per-chunk spam
         if (bypassedCount > 0) {
@@ -1177,6 +1205,7 @@ export function memRunVaultMigration() {
                 };
                 mem.longTermVault.push(newVaultChunk);
                 newVaultChunksForDB.push(newVaultChunk);
+                memJevTagArchive(newVaultChunk, mem.longTermVault).catch(() => {});
 
                 mem.shortTermChunks.splice(i, 1);
                 migrated = true;
@@ -1400,12 +1429,16 @@ export function memGetRelevantVaultEntries() {
 
     if (!context || !context.chat || !mem || !mem.longTermVault || mem.longTermVault.length === 0) return [];
 
+    // A confident "this turn needs no memory" from the query-strategy decision.
+    // Off/shadow/unsure all leave this false.
+    if (memJevSkipRetrieval()) return [];
+
     const vault = mem.longTermVault;
     const engine = mem.scannerEngine || 'tfidf';
 
     // --- ENGINE 1: SEMANTIC EMBEDDINGS (ST API) ---
     if (engine === 'semantic') {
-        if (currentSemanticMatches.length > 0) return currentSemanticMatches;
+        if (currentSemanticMatches.length > 0) return memJevApplyPlan(currentSemanticMatches);
         // Falling through to TF-IDF keeps retrieval working when the vector store is
         // slow, empty, purged or unreachable — but it used to do so in complete
         // silence, so a broken index was indistinguishable from a working one and
@@ -1429,7 +1462,7 @@ export function memGetRelevantVaultEntries() {
     if (uniqueKeywords.length === 0) return [];
 
     const cacheKey = kwHash + "#" + vault.length + "#" + (vault[vault.length - 1]?.timestamp || 0);
-    if (_vaultRetrievalCache.key === cacheKey) return _vaultRetrievalCache.result;
+    if (_vaultRetrievalCache.key === cacheKey) return memJevApplyPlan(_vaultRetrievalCache.result);
 
     // Pre-lowercase all vault texts ONCE (avoids thousands of redundant .toLowerCase() calls)
     const vaultTexts = vault.map(v => (v.text || v.summary || "").toLowerCase());
@@ -1468,7 +1501,7 @@ export function memGetRelevantVaultEntries() {
 
     const result = scoredVault.filter(s => s.score > 0).sort((a, b) => b.score - a.score).slice(0, 3);
     _vaultRetrievalCache = { key: cacheKey, result };
-    return result;
+    return memJevApplyPlan(result);
 }
 
 // Rule B: Visual Fading Update (STRICT) — DEBOUNCED + RANGE-BASED CSS

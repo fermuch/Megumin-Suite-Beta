@@ -22,6 +22,12 @@ import { meguminEnginePrompts } from "../prompts/meguminEngine.js";
 import { IMAGE_V2_PROMPTS } from "../prompts/imageGenV2.js";
 import { sdGenreLabel } from "../features/storyplan/ui.js";
 import { memEnsureSemanticQueryFresh } from "../features/memory/vectordb.js";
+import { memJevPrepareQuery, memJevRerankShortlist } from "../features/memory/jev.js";
+import { memGetRelevantVaultEntries } from "../features/memory/index.js";
+import { npcJevPrepareRanking, npcJevRankPlan } from "../features/npc/jev.js";
+import { npcBuildTextFromData } from "../features/npc/data.js";
+import { diceJevPrepare } from "../features/blocks/jevDice.js";
+import { contextJevPrepare, estimateTokens } from "./contextJev.js";
 import { npcBuildDossierPrompt } from "../features/npc/fields.js";
 import { escapeRegex } from "../utils/regex.js";
 import { buildBaseDict } from "./buildBaseDict.js";
@@ -372,6 +378,15 @@ async function buildPromptInjection(data, type) {
     // built it, [[placeholders]] and old blocks included.
     if (!suiteEnabled()) return;
 
+    // JEV (docs/jev.md proposals 5 and 6): decide the turn's query strategy,
+    // refresh the vector matches for it, then re-rank the shortlist. All three
+    // are no-ops unless the matching feature is ON; shadow mode logs and leaves
+    // the arrays untouched.
+    if (localProfile.memoryCore && localProfile.memoryCore.enabled) {
+        try { await memJevPrepareQuery(); } catch (e) {
+            console.warn("[Megumin Suite] JEV query strategy failed; using the length rule.", e);
+        }
+    }
     // Semantic memory retrieval is a network call fired on a debounce, so without
     // waiting here the prompt can be assembled from the previous turn's matches.
     // No-ops unless the search text actually changed, so swipes and regenerations
@@ -379,6 +394,57 @@ async function buildPromptInjection(data, type) {
     // the prompt preview call buildBaseDict(true) and never reach this line.
     try { await memEnsureSemanticQueryFresh(); } catch (e) {
         console.warn("[Megumin Suite] Semantic refresh before prompt build failed; using what is in hand.", e);
+    }
+    if (localProfile.memoryCore && localProfile.memoryCore.enabled) {
+        try { await memJevRerankShortlist(memGetRelevantVaultEntries); } catch (e) {
+            console.warn("[Megumin Suite] JEV memory re-ranking failed; keeping retrieval order.", e);
+        }
+    }
+
+    // docs/jev.md proposal 15: rank the NPC shortlist for this scene before the
+    // synchronous prompt assembly reads it. No-op unless the feature is ON.
+    if (localProfile.npcBank && localProfile.npcBank.enabled) {
+        try {
+            const chat = typeof getContext === "function" ? (getContext()?.chat || []) : [];
+            const exchange = chat.slice(-2).map(m => meguminCleanChatHistoryText(m.mes || "")).join(" ").slice(-6000);
+            await npcJevPrepareRanking(exchange);
+        } catch (e) {
+            console.warn("[Megumin Suite] JEV NPC ranking failed; keeping keyword order.", e);
+        }
+    }
+
+    // docs/jev.md proposal 26: decide the user's primary attempt before the
+    // dice numbers are rolled, so the resolved line can be handed to the model.
+    try { await diceJevPrepare(); } catch (e) {
+        console.warn("[Megumin Suite] JEV dice assessment failed; using the story model's judgment.", e);
+    }
+
+    // docs/jev.md proposal 22: allocate the optional context inside the user's
+    // token budget. The selection is applied by buildBaseDict to the memory and
+    // NPC sections only; mandatory content is never a candidate.
+    try {
+        if (localProfile.memoryCore || localProfile.npcBank) {
+            const chat = typeof getContext === "function" ? (getContext()?.chat || []) : [];
+            const lastUser = [...chat].reverse().find(m => m && m.is_user);
+            const list = [];
+            for (const m of memGetRelevantVaultEntries() || []) {
+                const text = String(m.text || m.summary || "");
+                list.push({ id: `memory:${m.id}`, kind: "memory", text, tokens: estimateTokens(text), ref: m.id });
+            }
+            const npcPlan = npcJevRankPlan();
+            if (npcPlan.active) {
+                const byName = new Map((localProfile.npcBank?.npcs || []).map(n => [n.name, n]));
+                for (const name of npcPlan.conversation) {
+                    const npc = byName.get(name);
+                    if (!npc) continue;
+                    const text = npcBuildTextFromData(npc);
+                    list.push({ id: `npc:${name}`, kind: "npc", text, tokens: estimateTokens(text), ref: name });
+                }
+            }
+            await contextJevPrepare(meguminCleanChatHistoryText(lastUser?.mes || ""), list);
+        }
+    } catch (e) {
+        console.warn("[Megumin Suite] JEV context budgeting failed; keeping the full assembly.", e);
     }
 
     const dict = buildBaseDict();

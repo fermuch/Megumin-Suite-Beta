@@ -249,6 +249,24 @@ function describe(key, v) {
     return v === "chomusuke" ? "Chomusuke on" : "Chomusuke off";
 }
 
+/**
+ * Applies one tested loadout to the character on screen. Used by the JEV setup
+ * assistant, which may only ever offer the existing table and never edits it.
+ */
+export function applyLoadoutForCharacter(loadout) {
+    if (!loadout) return false;
+    const liveKey = getCharacterKey() || "default";
+    if (_loadedProfileKey && liveKey !== _loadedProfileKey) {
+        toastr.warning("The panel is still showing the previous chat's settings. Reopen it and try again.", "Megumin Suite");
+        return false;
+    }
+    applyLoadout(localProfile, loadout, CTX, loadout.settings);
+    saveProfileToMemory();
+    fireRefreshHook(REFRESH.TOKEN_COUNT);
+    toastr.success(`${loadout.name} is in use on this character.`, "Megumin Suite");
+    return true;
+}
+
 function useLoadout(l, draft, rerender) {
     const settings = draft || l.settings;
     // Same guard as Global sync: the page must belong to the chat that's open,

@@ -9,6 +9,7 @@
 // ────────────────────────────────────────────────────────────────────────────
 
 import { worldCardInfo, worldSetEntryDisabled, worldSettings, worldSameCharacter } from "../../state/index.js";
+import { npcJevPickSamePerson } from "../npc/jev.js";
 
 const esc = v => String(v == null ? "" : v)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -41,6 +42,19 @@ function newcomerRow(entryId, n, onChanged) {
     const pick = row.querySelector(".meg-wsnew-pick");
     const same = row.querySelector(".meg-wsnew-same");
     pick.addEventListener("change", () => { same.disabled = !pick.value; });
+    // docs/jev.md proposal 16: a high-confidence identity match PRESELECTS the
+    // existing control. "Same person" still has to be pressed; nothing merges
+    // on its own.
+    npcJevPickSamePerson(n.name, n.others).then(match => {
+        if (!match) return;
+        if (![...pick.options].some(o => o.value === match)) return;
+        pick.value = match;
+        same.disabled = false;
+        const hint = document.createElement("span");
+        hint.className = "meg-wsnew-text";
+        hint.textContent = ` (JEV reads ${match} as the same person; confirm with Same person)`;
+        row.querySelector(".meg-wsnew-text").appendChild(hint);
+    }).catch(() => {});
     same.addEventListener("click", () => {
         if (!pick.value) return;
         if (worldSameCharacter(n.name, pick.value)) {

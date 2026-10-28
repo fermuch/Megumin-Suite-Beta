@@ -9,6 +9,77 @@ README on the stable branch.
 
 ---
 
+## 2026-10-28 — JEV decisions (optional)
+
+> A System One model (JEV) can now answer the small yes/no, choice and score
+> questions the suite used to guess at: which memories to keep, whether a parsed
+> change is in the reply, whether a clue was really revealed, whether a picture
+> is warranted. **Off by default**, shadow mode by default, and every feature
+> falls back to today's behaviour. The full decision map is in `docs/jev.md`.
+
+### Settings → JEV decisions
+
+- **Two switches and a key.** The runtime is off until you turn it on and tick
+  the consent switch (story text goes to a third party). The key is per browser:
+  kept in memory for the session unless you tick "remember", and never written
+  to settings, presets, profiles, logs or error messages.
+- **Provider and model are pinned.** OpenRouter's System One route is the
+  default (its browser preflight passes and it uses TypeSafe's shape); Vercel's
+  AI Gateway is the alternative behind the same validation. Changing the model
+  changes every cache identity and every threshold's meaning.
+- **Shadow mode is on by default.** Every judgment is made, compared with what
+  the suite would have done, and logged — and nothing changes. Only a feature
+  you set to **on**, with shadow mode off, can act, and only when its policy is
+  confident. Low confidence always means the old path.
+
+### What it decides
+
+- **Memory** — the query strategy for the turn (latest question, recent
+  exchange, or no retrieval), re-ranking and dropping the retrieved shortlist,
+  checking a generated summary against its chunk, and flagging duplicate or
+  superseded archives instead of deleting them.
+- **State and cards** — verifying parsed World State changes and Notebook clues
+  against the reply, checking parsed Blocks for meaning (after the sanitizers),
+  and naming *why* a Chomusuke answer was unusable (refusal, truncation, wrong
+  job, prose).
+- **NPC Bank** — scene relevance for dossiers and image tags, a gate on creating
+  a dossier for a background extra, verification of dossier changes, and a
+  portrait/outfit-tag review before ComfyUI.
+- **Story Director** — whether the arc is complete, stalled or redirected
+  (combined with the tracker and frequency rules), and a check on a generated
+  directive before it is saved.
+- **Dice** — for the player-only dice add-on, whether the user's primary attempt
+  needs a roll, its difficulty band and competence. Code rolls, maps the band to
+  the existing DC ladder and writes the resolved line; later and NPC attempts
+  keep the story model's judgment.
+- **Images** — skip the conditional image writer when nothing photo-worthy
+  happened, review an image prompt before it costs a render, and (experimental,
+  off) review the render itself.
+- **Tools** — Setup assistant (your words → existing Story Config options, as a
+  diff), Model loadout suggestion (from the tested table only), Add-on
+  diagnostics, Reply Doctor with swipe ranking, and a context-budget preview.
+  Each proposes; nothing applies until you press the button.
+
+### The Decision Inspector
+
+Global Settings → JEV → **Open**. Metadata only: feature, question-set and model
+versions, answers, probabilities, the policy's route, the route the suite
+actually took, latency, tokens, and an accept/reject label. Story text is stored
+only if you turn on fixtures. Export is a JSON file with no key in it.
+
+### Guarantees
+
+- Disabling JEV never disables a suite feature. A missing key, a 401, a timeout,
+  a malformed answer, or an exhausted per-turn call budget all resolve to "run
+  the old path", silently.
+- A negative semantic verdict is different from a failure: it follows the
+  feature's review/prose/raw-source path (for example a summary that cannot be
+  confirmed is not filed, and the chunk is summarised again next run).
+- Merges, deletions, settings and story state stay code- and user-owned. JEV can
+  drop a parsed change or preselect a merge; it never writes one.
+
+---
+
 ## 2026-10-25
 
 > World State lists stop growing forever, an image the story model writes waits

@@ -90,6 +90,7 @@ import { meguminCleanChatHistoryText, getChatForStoryDirector, getChatForNpcScan
 import { useMeguminEngine, runWithChomusuke, chomusukeSessionPromise, setReplyHeld, stopJobsForOtherChats } from "./src/engine/tasks.js";
 import { initChomusukeIndicator } from "./src/features/blocks/chomusukeIndicator.js";
 import { warnChomusuke, answerKind } from "./src/engine/chomusukeNotice.js";
+import { warnUnusableAnswer } from "./src/engine/jevNotice.js";
 import { escapeHtmlAttr } from "./src/utils/html.js";
 import { downloadJsonFile } from "./src/utils/download.js";
 import { showKazumaProgress } from "./src/ui/progress.js";
@@ -126,8 +127,14 @@ import { npcParseUpdateBlocks, npcApplyUpdates, npcUndoHistoryEntry } from "./sr
 import { renderNpcBank, renderNpcList } from "./src/features/npc/ui.js";
 import {
     stateOnMessageReceived, stateOnSwiped, stateOnSwipeDeleted, stateOnEdited, stateOnDeleted, stateOnChatLoaded,
-    setWorldStateChangedHook,
+    setWorldStateChangedHook, getWorldState, worldHasState,
 } from "./src/state/index.js";
+import { jevNewTurn } from "./src/jev/index.js";
+import { getReplyAssessment, setAssessmentContextProvider } from "./src/jev/assessments.js";
+import { setImageCastProvider } from "./src/features/imagegen/jev.js";
+import { npcJevWorthDossier, npcFilterUpdates } from "./src/features/npc/jev.js";
+import { jevArcSignal, jevCheckDirective, directiveWarningText } from "./src/features/storyplan/jev.js";
+import { currentImageCast } from "./src/features/imagegen/v2/index.js";
 import {
     meguminDecorateMessageBody, meguminRefreshBlocksInChat, meguminScheduleBlocksRefresh,
 } from "./src/features/blocks/chat.js";
@@ -260,6 +267,14 @@ jQuery(async () => {
         dropLookResidue();
         initSidePanel({ profileGetter: () => localProfile });
         initChomusukeIndicator();
+        // JEV's shared assessments need the current locations and whether the
+        // Story Director is running. Registered here so src/jev/ never imports
+        // the state store or the profile layer back.
+        setAssessmentContextProvider(() => ({
+            locations: worldHasState() ? (getWorldState().locations || []).map(l => l.name || l) : [],
+            directorEnabled: Boolean(localProfile && localProfile.storyPlan && localProfile.storyPlan.enabled),
+        }));
+        setImageCastProvider(currentImageCast);
         const h = await $.get(`${extensionFolderPath}/example.html`);
         $("body").append(h);
         initDraggableButton();
@@ -478,6 +493,8 @@ jQuery(async () => {
             // the chat.
             eventSource.on(event_types.GENERATION_STARTED, async (genType, _params, dryRun) => {
                 if (dryRun || genType === "quiet") return;
+                // One user turn, one budget: a retry loop cannot become a spend.
+                jevNewTurn();
                 const session = chomusukeSessionPromise();
                 if (!session) return;
                 toastr.info("Waiting a moment for Chomusuke to finish reading the last reply…", "Megumin Suite", { timeOut: 3000 });
@@ -529,8 +546,19 @@ jQuery(async () => {
                 // Chomusuke "Combine calls": on an image turn, one call reads World
                 // State AND writes the image prompt (no separate read below).
                 const combinedTurn = emptyReply ? null : combinedTurnWanted(receivedId, receivedType);
+
+                // docs/jev.md proposals 9 and 10: ONE cached reading of this
+                // reply, shared by every consumer below. `av` is null unless the
+                // feature is ON and the answers were confident, so every gate
+                // below falls back to today's logic when it is null.
+                const replyIndex = typeof receivedId === "number" ? receivedId : (getContext().chat || []).length - 1;
+                const assessment = emptyReply ? null : await getReplyAssessment(replyIndex);
+                const av = assessment && assessment.active ? assessment.values : null;
+
                 try {
-                    if (stateOnMessageReceived(receivedId, receivedType, { skipSideRead: emptyReply || Boolean(combinedTurn && combinedTurn.world) })) meguminScheduleBlocksRefresh();
+                    if (await stateOnMessageReceived(receivedId, receivedType, {
+                        skipSideRead: emptyReply || Boolean(combinedTurn && combinedTurn.world) || Boolean(av && av.worldFactsChanged === false),
+                    })) meguminScheduleBlocksRefresh();
                     // Image Gen V2: a character who just arrived gets a look.
                     v2LooksForArrivals();
                 } catch (e) {
@@ -552,7 +580,8 @@ jQuery(async () => {
                 // --- NOTEBOOK BY CHOMUSUKE (plan 010) ---
                 // Clues, who learned what, what came out. Does nothing unless the
                 // Notebook route is on and the notebook has live truths.
-                if (!emptyReply && !BLOCKS_NOT_A_REPLY.has(receivedType) && !(combinedTurn && combinedTurn.notebook)) {
+                if (!emptyReply && !BLOCKS_NOT_A_REPLY.has(receivedType) && !(combinedTurn && combinedTurn.notebook)
+                    && !(av && av.notebookEvidence === false)) {
                     const chatNow = getContext().chat || [];
                     const nbIndex = typeof receivedId === "number" ? receivedId : chatNow.length - 1;
                     notebookReadForReply(nbIndex, { force: receivedType === "continue" })
@@ -627,6 +656,22 @@ jQuery(async () => {
                                 }
                             }
 
+                            // 2b. docs/jev.md proposal 19: read the arc itself,
+                            // then combine with the tracker and frequency above.
+                            // JEV can only ASK for an evolve the existing triggers
+                            // did not ask for; it never cancels one they did.
+                            if (!needsEvolve && sp.triggerMode !== 'manual' && sp.currentPlan) {
+                                const signal = await jevArcSignal({
+                                    tracker: sp.lastTrackerState || "",
+                                    directive: sp.currentPlan || "",
+                                    exchange: cleanAIOutput(String(lastMsg.mes || "")).slice(-6000),
+                                });
+                                if (signal && signal.action === "evolve") {
+                                    needsEvolve = true;
+                                    console.log(`[${extensionName}] 🎬 JEV read the arc as complete or redirected. Triggering smart auto-evolve.`);
+                                }
+                            }
+
                             // 3. Execute Auto-Evolve
                             if (needsEvolve) {
                                 toastr.info("Auto-Evolving Narrative Directive...", "Story Director");
@@ -649,6 +694,18 @@ jQuery(async () => {
                                         }
                                         const directiveMatch = output?.match(/<directive>([\s\S]*?)<\/directive>/i) || output?.match(/<plot>([\s\S]*?)<\/plot>/i);
                                         if (directiveMatch) {
+                                            // docs/jev.md proposal 20: verify before saving.
+                                            const check = await jevCheckDirective({
+                                                directive: directiveMatch[1].trim(),
+                                                recent: chatText,
+                                                note: sp.notes || "",
+                                                genre: sp.genre || "",
+                                                unresolved: sp.lastTrackerState || "",
+                                            });
+                                            if (check && check.verdict !== "accept") {
+                                                toastr.warning(directiveWarningText(check), "Story Director", { timeOut: 9000 });
+                                                return;
+                                            }
                                             sp.currentPlan = directiveMatch[1].trim();
                                             sp.planMessageIndex = (getContext().chat?.length || 1) - 1;
                                             saveProfileToMemory();
@@ -659,7 +716,7 @@ jQuery(async () => {
                                             toastr.success("Narrative Directive Evolved silently!", "Story Director");
                                         } else if (output !== null) {
                                             // null: the worker failed and has said so already.
-                                            warnChomusuke(answerKind(output), ["storyPlan"]);
+                                            await warnUnusableAnswer(output, ["storyPlan"]);
                                         }
                                     } catch (e) {
                                         console.error("[Megumin Suite] Story Director auto-evolve failed", e);
@@ -724,9 +781,18 @@ jQuery(async () => {
                     if (chat && chat.length) {
                         const lastMsg = chat[chat.length - 1];
                         if (!lastMsg.is_user && !lastMsg.is_system) {
-                            const dossiers = meguminFindNpcDossiers(lastMsg.mes);
+                            let dossiers = meguminFindNpcDossiers(lastMsg.mes);
                             let added = false;
                             let matched = dossiers.length > 0;
+                            // docs/jev.md proposal 16: a dossier is for a named,
+                            // speaking, recurring character. A confident "no" from
+                            // the shared assessment or this check skips creation;
+                            // the update pass below still runs.
+                            if (dossiers.length && av && av.dossierWorthy === false) dossiers = [];
+                            else if (dossiers.length) {
+                                const worth = await npcJevWorthDossier(lastMsg.mes, (npcBank.npcs || []).map(n => n.name));
+                                if (worth === false) dossiers = [];
+                            }
                             for (const dossier of dossiers) {
                                 const npcName = dossier.name;
                                 const npcContent = dossier.raw;
@@ -750,7 +816,11 @@ jQuery(async () => {
                             // the update has someone to apply to.
                             const parsedUpdates = npcParseUpdateBlocks(lastMsg.mes);
                             if (parsedUpdates.length) {
-                                const { applied, refused } = npcApplyUpdates(parsedUpdates, { messageIndex: chat.length - 1 });
+                                // docs/jev.md proposal 17: verify each parsed op
+                                // against the reply and pick a removal's target
+                                // from the existing lines. Code still applies.
+                                const verifiedUpdates = await npcFilterUpdates(parsedUpdates, lastMsg.mes);
+                                const { applied, refused } = npcApplyUpdates(verifiedUpdates, { messageIndex: chat.length - 1 });
                                 if (applied.length) {
                                     added = true;
                                     const who = [...new Set(applied.map(e => e.npc))].join(", ");

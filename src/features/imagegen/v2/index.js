@@ -16,6 +16,7 @@ import { waitUnlessStuck } from "./waitFor.js";
 import { buildImageCast, inImage, needsLook } from "./cast.js";
 import { resolveImagePrompt } from "./resolve.js";
 import { renderCastList, renderV2Rules, renderV2ManualPrompt, renderV2InlineInstruction, renderV2InlineSplit, renderV2Extras, splitCombinedAnswer } from "./prompt.js";
+import { npcJevFilterOutfitTags } from "../../npc/jev.js";
 import { refreshOutfitTags, storeOutfitTags, storeNewLooks, takeLookAttempts, releaseLookAttempts, warnLooklessInScene, warnLooksNotMade, sheetSourceFor, looksSettled, looksBeingRead } from "./looks.js";
 
 export const V2_DEFAULTS = {
@@ -145,7 +146,7 @@ export async function v2GenerateImagePromptText({ extraInstruction = "" } = {}) 
     if (!extras) return cleanModelPrompt(raw);
     const { prompt, rest } = splitCombinedAnswer(raw);
     if (String(raw || "").trim() && getContext()?.chatId === chatAtStart) {
-        if (rest && staleOutfits.length) storeOutfitTags(staleOutfits, rest);
+        if (rest && staleOutfits.length) storeOutfitTags(staleOutfits, await npcJevFilterOutfitTags(staleOutfits, rest));
         if (missingLooks.length) {
             const added = rest ? storeNewLooks(missingLooks.map(m => ({ name: m.name, aliases: m.aliases || [] })), rest) : [];
             if (added.length) toastr.info(`New look${added.length === 1 ? "" : "s"} for ${added.join(", ")}.`, "Megumin Suite", { timeOut: 3500 });

@@ -10,7 +10,9 @@
 // the extension imports from "imagegen/index.js" is still exported here.
 // ────────────────────────────────────────────────────────────────────────────
 
+import { Popup, POPUP_TYPE } from "../../st.js";
 import { localProfile } from "../../core/state.js";
+import { jevCheckImagePrompt, exchangeAt } from "./jev.js";
 import { setActiveImageGenRequest } from "../../core/activeRequests.js";
 import { showKazumaProgress } from "../../ui/progress.js";
 import { runWithChomusuke } from "../../engine/tasks.js";
@@ -64,6 +66,16 @@ export function imageV2InlineSplit(opts) {
     return imageGenEngine() === "v2" ? v2InlineSplit(opts) : null;
 }
 
+async function confirmImageIssues(issues) {
+    const $root = $(`<div class="bgp">
+        <div class="bgp-head"><div><b>This prompt may not match the scene</b></div>
+        <div class="bgp-meta">JEV flagged: ${$("<span>").text(issues.join(", ")).html()}. It was not changed for you.</div>
+        <div class="bgp-meta">Cancelling leaves the prompt in Chat, where you can edit it and generate again.</div></div>
+    </div>`);
+    const popup = new Popup($root, POPUP_TYPE.CONFIRM, "", { okButton: "Render anyway", cancelButton: "Cancel", wide: true });
+    return Boolean(await popup.show());
+}
+
 export async function igManualGenerate() {
     const s = localProfile?.imageGen;
     if (!s || !s.enabled) return;
@@ -86,6 +98,15 @@ export async function igManualGenerate() {
             $("#kazuma_progress_overlay").hide();
             toastr.error("The model's answer came back empty, so no image was made. If the model did reply (check the Network tab), your API sends answers in a shape SillyTavern can't read when streaming is off; try another provider for image prompts.", "Megumin Suite", { timeOut: 12000 });
             return;
+        }
+
+        // docs/jev.md proposal 29: verify before the render. A rejected prompt
+        // is never rewritten — the user edits it, or explicitly overrides.
+        const verdict = await jevCheckImagePrompt({ prompt: promptText, reply: exchangeAt() });
+        if (!verdict.ok) {
+            $("#kazuma_progress_overlay").hide();
+            const proceed = await confirmImageIssues(verdict.issues);
+            if (!proceed) return;
         }
 
         toastr.info("Sending to ComfyUI...", "Megumin Suite");

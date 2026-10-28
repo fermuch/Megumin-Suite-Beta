@@ -15,6 +15,7 @@ import { fireRefreshHook, REFRESH } from "../../core/refreshHooks.js";
 import { setActiveNpcPfpRequest } from "../../core/activeRequests.js";
 import { showKazumaProgress } from "../../ui/progress.js";
 import { npcBuildTextFromData } from "./data.js";
+import { npcJevCheckPrompt } from "./jev.js";
 import { comfyBase } from "../imagegen/comfyUrl.js";
 
 // Generate NPC portrait via ComfyUI — uses AI to generate the prompt from full NPC info
@@ -77,9 +78,21 @@ export async function npcGeneratePfp(npcName) {
     // --- ALWAYS ON PROMPT PREVIEW / EDIT FOR NPC PORTRAITS ---
     $("#kazuma_progress_overlay").hide(); // Hide progress bar temporarily
 
+    // docs/jev.md proposal 18: check the prompt against the dossier and the
+    // current outfit BEFORE it is rendered. Issues are shown in the existing
+    // preview; the user can still edit and render.
+    const jevCheck = await npcJevCheckPrompt({
+        name: npc.name,
+        dossier: npcText,
+        outfit: npc.outfit || "",
+        prompt: promptText,
+        framing: "character portrait, upper body",
+    });
+
     const $content = $(`
         <div style="display:flex; flex-direction:column; gap:10px; font-family: 'Inter', sans-serif;">
             <div style="font-size: 0.85rem; color: var(--text-muted);">Review or modify the character portrait prompt before rendering.</div>
+            ${jevCheck.issues.length ? `<div class="bgp-meta" style="color: var(--warning, #f59e0b);">JEV flagged this prompt: ${$("<span>").text(jevCheck.issues.join(", ")).html()}. It was not changed for you.</div>` : ""}
             <textarea class="ps-modern-input npc-preview-textarea" style="height: 150px; resize: vertical; font-family: monospace; font-size: 0.85rem; padding: 10px;">${promptText}</textarea>
         </div>
     `);
