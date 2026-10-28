@@ -237,6 +237,12 @@ async function openFeatureModes() {
     const $root = $(`<div class="bgp"></div>`);
     $root.append(`<div class="bgp-head"><div><b>Which decisions JEV may improve</b></div>
         <div class="bgp-meta">Shadow: judged and logged, never acted on. On: acted on when the policy is confident; otherwise the current behaviour runs. Off: never asked.</div></div>`);
+    $root.append(`<div style="display:flex; gap:6px; flex-wrap:wrap; margin:4px 0 10px 0;">
+        <button type="button" class="menu_button" id="jev_all_on" style="width:auto;margin:0;">All on</button>
+        <button type="button" class="menu_button" id="jev_all_shadow" style="width:auto;margin:0;">All shadow</button>
+        <button type="button" class="menu_button" id="jev_all_off" style="width:auto;margin:0;">All off</button>
+        <span class="bgp-meta" style="align-self:center;">Applies to every feature and saves through this page, so the server copy cannot overwrite it.</span>
+    </div>`);
     const s = jevSettings();
     for (const [stage, ids] of featureIdsByStage()) {
         $root.append(`<div class="wstyle-section-head blue" style="margin-top:10px;"><i class="fa-solid fa-layer-group"></i> Stage ${stage}</div>`);
@@ -255,6 +261,14 @@ async function openFeatureModes() {
                 </div>`);
         }
     }
+    const setAll = (mode) => {
+        for (const id of Object.keys(FEATURES)) setFeatureMode(id, mode);
+        $root.find(".jev-mode").val(mode);
+        saveSettingsDebounced();
+    };
+    $root.find("#jev_all_on").on("click", () => setAll("on"));
+    $root.find("#jev_all_shadow").on("click", () => setAll("shadow"));
+    $root.find("#jev_all_off").on("click", () => setAll("off"));
     $root.on("change", ".jev-mode", function () {
         setFeatureMode($(this).data("feature"), $(this).val());
         saveSettingsDebounced();
