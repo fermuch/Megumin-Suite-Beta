@@ -44,7 +44,8 @@ README on the stable branch.
 - **Memory** — the query strategy for the turn (latest question, recent
   exchange, or no retrieval), re-ranking and dropping the retrieved shortlist,
   checking a generated summary against its chunk, and flagging duplicate or
-  superseded archives instead of deleting them.
+  superseded archives instead of deleting them — two-stage now: JEV picks the
+  candidate archives first, so a contradiction worded differently is not missed.
 - **State and cards** — verifying parsed World State changes and Notebook clues
   against the reply, checking parsed Blocks for meaning (after the sanitizers),
   and naming *why* a Chomusuke answer was unusable (refusal, truncation, wrong

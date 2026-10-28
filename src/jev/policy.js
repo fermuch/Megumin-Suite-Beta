@@ -25,6 +25,7 @@ export const FEATURES = {
     "memory.query": { stage: 2, label: "Memory query", summary: "Choose latest question, recent exchange, or no retrieval." },
     "memory.rerank": { stage: 2, label: "Memory re-ranking", summary: "Rank, drop, and separate conflicting retrieved memories." },
     "memory.summary": { stage: 2, label: "Memory summaries", summary: "Check a generated summary against its source chunk before filing it." },
+    "memory.shortlist": { stage: 2, label: "Archive shortlist", summary: "Pick which existing archives could share the new one's subject." },
     "memory.archive": { stage: 2, label: "Archive duplicates", summary: "Link, flag, or route duplicate and superseded archives." },
     "notebook.clue": { stage: 2, label: "Notebook clues", summary: "Decide whether prose reveals a clue or only mentions it." },
     "notebook.secret": { stage: 2, label: "Secret knowledge", summary: "Check who learned a secret, and whether someone leaks what they never knew." },
@@ -216,6 +217,20 @@ const POLICIES = {
             confidence = clamp01(Math.min(certainty(grounded), certainty(wrongEntity), certainty(unsupported)));
         }
         return { route: { verdict, grounded, wrongEntity, unsupported, omits, language }, confidence, reason: verdict };
+    },
+
+    "memory.shortlist": (answers, ctx) => {
+        const recent = (ctx.recent || []).slice(0, 20);
+        if (!recent.length) return { route: null, confidence: 0, reason: "nothing to compare" };
+        const ids = recent.map((_, i) => `c${i}_related`);
+        if (!have(answers, ids)) return { route: null, confidence: 0, reason: "incomplete" };
+        const rows = recent.map((m, i) => ({ id: m.id, p: noul(answers, `c${i}_related`) ?? 0 }));
+        const keep = rows.filter(r => r.p >= 0.5).sort((a, b) => b.p - a.p).slice(0, 3);
+        const certainNone = rows.every(r => r.p <= 0.3);
+        if (!keep.length && !certainNone) return { route: null, confidence: 0, reason: "uncertain" };
+        const used = keep.length ? keep : rows;
+        const confidence = clamp01(used.reduce((sum, r) => sum + certainty(r.p), 0) / used.length);
+        return { route: { ids: keep.map(r => r.id), rows }, confidence, reason: keep.length ? "shortlisted" : "none" };
     },
 
     "memory.archive": (answers) => {

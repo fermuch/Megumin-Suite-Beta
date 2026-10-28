@@ -136,7 +136,25 @@ const BUILDERS = {
         },
     }),
 
-    // P8 — classify a new archive against its nearest existing ones.
+    // P8 stage 1 — which existing archives could even be about the same thing?
+    // Replaces the old "shares a four-letter word" prefilter.
+    "memory.shortlist": (ctx) => {
+        const recent = (ctx.recent || []).slice(0, 20);
+        const questions = {};
+        recent.forEach((_, i) => {
+            questions[`c${i}_related`] = noul(`Could memory ${i + 1} concern the same event, person, fact, or state of affairs as the new memory?`);
+        });
+        return {
+            version: 1,
+            state: {
+                candidate: text(ctx.candidate, 1500),
+                recent: recent.map(m => ({ id: text(m.id, 60), text: text(m.text, 240) })),
+            },
+            questions,
+        };
+    },
+
+    // P8 stage 2 — classify a new archive against its shortlisted neighbours.
     "memory.archive": (ctx) => ({
         version: 1,
         state: {

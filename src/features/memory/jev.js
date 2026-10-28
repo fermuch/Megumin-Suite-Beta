@@ -163,27 +163,49 @@ export async function memJevTagArchive(chunk, vault) {
     const text = String(chunk.text || chunk.summary || "");
     if (!text) return;
 
-    // Cheap shortlist: keyword overlap with the new chunk. The JEV judgment is
-    // the expensive part; picking the three candidates is not worth a call.
-    const words = new Set(text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w => w.length >= 4));
-    const scored = [];
-    for (const candidate of vault) {
-        if (!candidate || candidate.id === chunk.id) continue;
-        const other = String(candidate.text || candidate.summary || "").toLowerCase();
-        let hits = 0;
-        for (const w of words) if (other.includes(w)) hits++;
-        if (hits > 0) scored.push({ candidate, hits });
-    }
-    if (!scored.length) return;
-    scored.sort((a, b) => b.hits - a.hits);
-    const nearest = scored.slice(0, 3);
+    // Stage 1 — JEV picks the candidates from recent archives. The old version
+    // required a shared four-letter word, so two statements about the same
+    // event in different words could never meet.
+    const recent = vault
+        .filter(v => v && v.id !== chunk.id)
+        .slice(-20)
+        .reverse();
+    if (!recent.length) return;
 
+    // Lexical nearest, used only when the shortlist feature is off/shadow/unsure.
+    const words = new Set(text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w => w.length >= 4));
+    const scored = recent
+        .map(candidate => {
+            const other = String(candidate.text || candidate.summary || "").toLowerCase();
+            let hits = 0;
+            for (const w of words) if (other.includes(w)) hits++;
+            return { candidate, hits };
+        })
+        .filter(s => s.hits > 0)
+        .sort((a, b) => b.hits - a.hits);
+    const heuristic = scored.slice(0, 3).map(s => s.candidate.id);
+
+    const picked = await jevRoute(
+        "memory.shortlist",
+        {
+            candidate: text,
+            recent: recent.map(v => ({ id: v.id, text: v.text || v.summary || "" })),
+        },
+        heuristic,
+    );
+    const ids = picked.route && Array.isArray(picked.route.ids) ? picked.route.ids.slice(0, 3) : heuristic;
+    if (!ids.length) return;
+    const byId = new Map(recent.map(v => [v.id, v]));
+    const nearest = ids.map(id => byId.get(id)).filter(Boolean);
+    if (!nearest.length) return;
+
+    // Stage 2 — relation, conflict, supersession on the shortlist.
     const result = await jevRoute(
         "memory.archive",
         {
             candidate: text,
             candidateWhen: chunk.id,
-            existing: nearest.map(n => ({ text: n.candidate.text || n.candidate.summary, when: n.candidate.id })),
+            existing: nearest.map(n => ({ text: n.text || n.summary, when: n.id })),
         },
         { route: "append" },
     );
