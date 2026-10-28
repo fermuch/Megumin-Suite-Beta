@@ -28,6 +28,7 @@ import { npcJevPrepareRanking, npcJevRankPlan } from "../features/npc/jev.js";
 import { npcBuildTextFromData } from "../features/npc/data.js";
 import { diceJevPrepare } from "../features/blocks/jevDice.js";
 import { contextJevPrepare, estimateTokens } from "./contextJev.js";
+import { meguminCleanChatHistoryText } from "./chatText.js";
 import { npcBuildDossierPrompt } from "../features/npc/fields.js";
 import { escapeRegex } from "../utils/regex.js";
 import { buildBaseDict } from "./buildBaseDict.js";
