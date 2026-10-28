@@ -102,6 +102,29 @@ const certainty = p => (p === null ? 0 : Math.abs(p - 0.5) * 2);
 /** True when every required answer exists. */
 const have = (answers, ids) => ids.every(id => answers && answers[id]);
 
+/** Aggregate confidence for a multi-flag assessment. A Noul inside the 0.3–0.7
+ *  dead zone is a deliberate "unknown": the consumer treats that flag as no gate,
+ *  so it is excluded instead of dragging the whole reading down. At least 60% of
+ *  the answers must still be decided. */
+function assessmentConfidence(answers, ids) {
+    const certs = [];
+    let decided = 0;
+    for (const id of ids) {
+        const a = answers[id];
+        if (!a) return 0;
+        if (a.type === "noul") {
+            if (a.noul > 0.3 && a.noul < 0.7) continue;
+            certs.push(certainty(a.noul));
+            decided += 1;
+        } else {
+            certs.push(a.confidence);
+            if (a.confidence >= 0.5) decided += 1;
+        }
+    }
+    if (!certs.length || decided / ids.length < 0.6) return 0;
+    return clamp01(certs.reduce((sum, v) => sum + v, 0) / certs.length);
+}
+
 /** Composite confidence: the weakest link, so one split answer cannot carry a route. */
 function weakest(answers, ids) {
     let low = 1;
@@ -551,7 +574,7 @@ const POLICIES = {
         };
         return {
             route: { values, answers },
-            confidence: weakest(answers, ids),
+            confidence: assessmentConfidence(answers, ids),
             reason: "assessed",
         };
     },
