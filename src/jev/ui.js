@@ -9,17 +9,15 @@
 //     plainly that this is plaintext in settings.json and its backups.
 //
 // The inspector shows what was asked, what came back, what code did with it, and
-// whether it agreed with the current behaviour — the shadow-mode evidence the doc
-// requires before any feature is promoted to "on".
+// whether it agreed with the behaviour the suite used before.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Popup, POPUP_TYPE, saveSettingsDebounced } from "../st.js";
 import { extensionName } from "../core/constants.js";
-import { FEATURES, featureIdsByStage } from "./policy.js";
+import { FEATURES } from "./policy.js";
 import { clearDecisions, exportBundle, labelDecision, readDecisions, summarise } from "./log.js";
 import {
-    MODES, clearJevKey, featureMode, getJevKey, jevSettings, keyHint,
-    migrateBrowserKeyToServer, setFeatureMode, setJevKey,
+    clearJevKey, getJevKey, jevSettings, keyHint, migrateBrowserKeyToServer, setJevKey,
 } from "./settings.js";
 import { jevProviderList } from "./client.js";
 import { jevLastError } from "./index.js";
@@ -41,7 +39,7 @@ function statusLine() {
     if (!jevSettings().enabled) return "Off. Nothing is sent anywhere.";
     if (!jevSettings().optIn) return `Waiting for consent: story text is not sent until you turn consent on.${tail}`;
     if (!getJevKey()) return `Waiting for a key.${tail}`;
-    return `Ready · ${keyHint()} · kept in server settings · ${jevSettings().shadow ? "every feature is in shadow mode" : "per-feature modes apply"}${tail}`;
+    return `Ready · ${keyHint()} · kept in server settings · every decision is on${tail}`;
 }
 
 // ── The settings section ────────────────────────────────────────────────────
@@ -58,7 +56,7 @@ export function appendJevSettings($content) {
         <div class="mtab-toggle-row ${s.enabled ? "active" : ""}" id="gs_toggle_jev" style="cursor:pointer; ${s.enabled ? "border-color:#38bdf8;" : ""}">
             <div class="toggle-info">
                 <div class="toggle-label"><i class="fa-solid fa-brain" style="color:#38bdf8;"></i> JEV decision runtime</div>
-                <div class="toggle-desc">Lets a System One model answer small yes/no, choice, and score questions beside the existing engine. It never writes prose, never replaces a parser, and never acts while a feature is in shadow mode. <b>Off:</b> the suite behaves exactly as it does today.</div>
+                <div class="toggle-desc">Lets a System One model answer small yes/no, choice, and score questions beside the existing engine. It never writes prose and never replaces a parser. <b>On:</b> every decision runs. <b>Off:</b> none of them do, and the suite behaves exactly as it does today.</div>
             </div>
             <div class="ps-switch" style="${s.enabled ? "background:#38bdf8;" : ""}"></div>
         </div>
@@ -104,20 +102,12 @@ export function appendJevSettings($content) {
                 <input type="text" id="jev_model" class="ps-modern-input" style="width:230px;" value="${esc(s.model)}" />
             </div>
         </div>
-        <div class="mtab-toggle-row ${s.shadow ? "active" : ""}" id="gs_toggle_jev_shadow" style="cursor:pointer; ${s.shadow ? "border-color:#a855f7;" : ""}">
-            <div class="toggle-info">
-                <div class="toggle-label"><i class="fa-solid fa-eye" style="color:#a855f7;"></i> Shadow mode</div>
-                <div class="toggle-desc">On: every judgment is made, compared, and logged, and <b>nothing changes</b>. Turn it off only after a feature's Inspector rows agree with what you would have chosen on your own chats.</div>
-            </div>
-            <div class="ps-switch" style="${s.shadow ? "background:#a855f7;" : ""}"></div>
-        </div>
         <div class="mtab-panel" style="margin:0; padding:12px 16px;">
             <div class="mtab-setting-row" style="padding:0 0 8px 0; border:none;">
                 <div class="set-info">
                     <div class="set-label"><i class="fa-solid fa-list-check" style="color:#10b981;"></i> Features</div>
                     <div class="set-desc" id="jev_status">${esc(statusLine())}</div>
                 </div>
-                <button type="button" id="jev_features" class="menu_button" style="width:auto; margin:0; white-space:nowrap;"><i class="fa-solid fa-sliders"></i> Modes</button>
             </div>
             <div class="mtab-setting-row" style="padding:0; border:none;">
                 <div class="set-info">
@@ -160,8 +150,6 @@ export function appendJevSettings($content) {
             .find(".ps-switch").css("background", st.enabled ? "#38bdf8" : "");
         $content.find("#gs_toggle_jev_consent").toggleClass("active", st.optIn).css("border-color", st.optIn ? "#f59e0b" : "var(--border-color)")
             .find(".ps-switch").css("background", st.optIn ? "#f59e0b" : "");
-        $content.find("#gs_toggle_jev_shadow").toggleClass("active", st.shadow).css("border-color", st.shadow ? "#a855f7" : "var(--border-color)")
-            .find(".ps-switch").css("background", st.shadow ? "#a855f7" : "");
         $content.find("#jev_status").text(statusLine());
     };
 
@@ -176,13 +164,6 @@ export function appendJevSettings($content) {
         st.optIn = !st.optIn;
         saveSettingsDebounced();
         repaint();
-    });
-    $content.find("#gs_toggle_jev_shadow").on("click", () => {
-        const st = jevSettings();
-        st.shadow = !st.shadow;
-        saveSettingsDebounced();
-        repaint();
-        if (!st.shadow) toastr.info("Shadow mode is off. Only features set to \"on\" will act; everything else keeps its current behaviour.", "Megumin Suite");
     });
 
     $content.find("#jev_key_save").on("click", () => {
@@ -218,7 +199,6 @@ export function appendJevSettings($content) {
         jevSettings().vision = this.checked;
         saveSettingsDebounced();
     });
-    $content.find("#jev_features").on("click", () => openFeatureModes());
     $content.find("#jev_tool_setup").on("click", () => openSetupAssistant());
     $content.find("#jev_tool_loadout").on("click", () => openLoadoutSuggestion());
     $content.find("#jev_tool_addons").on("click", () => openAddonDiagnostics());
@@ -231,52 +211,6 @@ export function appendJevSettings($content) {
     });
 }
 
-// ── Feature modes ───────────────────────────────────────────────────────────
-
-async function openFeatureModes() {
-    const $root = $(`<div class="bgp"></div>`);
-    $root.append(`<div class="bgp-head"><div><b>Which decisions JEV may improve</b></div>
-        <div class="bgp-meta">Shadow: judged and logged, never acted on. On: acted on when the policy is confident; otherwise the current behaviour runs. Off: never asked.</div></div>`);
-    $root.append(`<div style="display:flex; gap:6px; flex-wrap:wrap; margin:4px 0 10px 0;">
-        <button type="button" class="menu_button" id="jev_all_on" style="width:auto;margin:0;">All on</button>
-        <button type="button" class="menu_button" id="jev_all_shadow" style="width:auto;margin:0;">All shadow</button>
-        <button type="button" class="menu_button" id="jev_all_off" style="width:auto;margin:0;">All off</button>
-        <span class="bgp-meta" style="align-self:center;">Applies to every feature and saves through this page, so the server copy cannot overwrite it.</span>
-    </div>`);
-    const s = jevSettings();
-    for (const [stage, ids] of featureIdsByStage()) {
-        $root.append(`<div class="wstyle-section-head blue" style="margin-top:10px;"><i class="fa-solid fa-layer-group"></i> Stage ${stage}</div>`);
-        for (const id of ids) {
-            const meta = FEATURES[id];
-            const own = s.features[id] || "shadow";
-            $root.append(`
-                <div class="bgp-msg" style="display:flex; gap:10px; align-items:center; justify-content:space-between;">
-                    <div>
-                        <div><b>${esc(meta.label)}</b> <span class="bgp-meta">${esc(id)}</span></div>
-                        <div class="bgp-meta">${esc(meta.summary)}</div>
-                    </div>
-                    <select class="ps-modern-input jev-mode" data-feature="${esc(id)}" style="width:120px;">
-                        ${MODES.map(m => `<option value="${m}" ${own === m ? "selected" : ""}>${m}</option>`).join("")}
-                    </select>
-                </div>`);
-        }
-    }
-    const setAll = (mode) => {
-        for (const id of Object.keys(FEATURES)) setFeatureMode(id, mode);
-        $root.find(".jev-mode").val(mode);
-        saveSettingsDebounced();
-    };
-    $root.find("#jev_all_on").on("click", () => setAll("on"));
-    $root.find("#jev_all_shadow").on("click", () => setAll("shadow"));
-    $root.find("#jev_all_off").on("click", () => setAll("off"));
-    $root.on("change", ".jev-mode", function () {
-        setFeatureMode($(this).data("feature"), $(this).val());
-        saveSettingsDebounced();
-    });
-    if (s.shadow) $root.append(`<div class="bgp-meta" style="margin-top:10px;">Shadow mode is on, so every "on" still behaves as "shadow" until you turn it off in Settings.</div>`);
-    await new Popup($root, POPUP_TYPE.TEXT, "", { wide: true, large: true, allowVerticalScrolling: true, okButton: "Close" }).show();
-}
-
 // ── Decision Inspector ──────────────────────────────────────────────────────
 
 export async function openDecisionInspector() {
@@ -287,7 +221,7 @@ export async function openDecisionInspector() {
         const list = await readDecisions();
         $root.empty();
         $root.append(`<div class="bgp-head"><div><b>Decision Inspector</b></div>
-            <div class="bgp-meta">${list.length} recorded judgment${list.length === 1 ? "" : "s"}. Metadata only. Labelling a shadow decision is what builds this feature's local accept/reject counts.</div></div>`);
+            <div class="bgp-meta">${list.length} recorded judgment${list.length === 1 ? "" : "s"}. Metadata only. Labelling a decision is what builds a feature's local accept/reject counts.</div></div>`);
 
         const rows = summarise(list);
         if (rows.length) {

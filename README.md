@@ -14,16 +14,18 @@ README on the stable branch.
 > A System One model (JEV) can now answer the small yes/no, choice and score
 > questions the suite used to guess at: which memories to keep, whether a parsed
 > change is in the reply, whether a clue was really revealed, whether a picture
-> is warranted. **Off by default**, shadow mode by default, and every feature
-> falls back to today's behaviour. The full decision map is in `docs/jev.md`.
+> is warranted. **Off by default**; turning it on turns every decision on, and
+> turning it off runs none of them. Every judgment still falls back to today's
+> behaviour when it is not confident. The full decision map is in `docs/jev.md`.
 
 ### Settings → JEV decisions
 
 - **Two switches and a key.** The runtime is off until you turn it on and tick
-  the consent switch (story text goes to a third party). All JEV settings —
-  provider, model, provider key, feature modes, budgets — live in this user's
-  server-side SillyTavern settings, so they follow the account across sessions
-  and browsers. That also means the key is plaintext in `settings.json` and its
+  the consent switch (story text goes to a third party). There is no per-feature
+  switch and no shadow mode: enabled means all decisions run, disabled means none
+  do. All JEV settings — provider, model, provider key, budgets — live in this
+  user's server-side SillyTavern settings, so they follow the account across
+  sessions and browsers. That also means the key is plaintext in `settings.json` and its
   backups, readable by anyone with access to the SillyTavern data directory. It
   is still never copied into presets, extension profiles, the decision log,
   diagnostics exports or error messages.
@@ -34,10 +36,11 @@ README on the stable branch.
   list, which the provider rejects with "Model does not exist". The decision log
   records the exact model that answered. Changing it changes every cache
   identity and every threshold's meaning.
-- **Shadow mode is on by default.** Every judgment is made, compared with what
-  the suite would have done, and logged — and nothing changes. Only a feature
-  you set to **on**, with shadow mode off, can act, and only when its policy is
-  confident. Low confidence always means the old path.
+- **All or nothing.** Enabling JEV switches every decision on; disabling it
+  switches them all off. A decision acts only when its policy is confident; low
+  confidence always means the old path, per decision. The Inspector still logs
+  each judgment next to what the suite would have done, which is what makes it
+  possible to see whether a decision is pulling its weight.
 
 ### What it decides
 

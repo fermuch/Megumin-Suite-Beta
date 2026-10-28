@@ -11,9 +11,7 @@
 //   1. It never throws. A disabled runtime, a network failure, a timeout, an HTTP
 //      error, a malformed answer, a policy error, or an exhausted call budget all
 //      resolve to "no route" so the caller runs exactly its old code.
-//   2. Shadow mode cannot change behaviour. In shadow the judgment is made,
-//      compared, and logged; `route` still comes back as the CURRENT value and
-//      `source` says "shadow".
+//   2. There is no shadow mode: enabled means every decision runs and may act.
 //   3. Low confidence cannot change behaviour. `decide()` nulls a route below the
 //      feature's threshold before this module sees it.
 //
@@ -23,7 +21,7 @@
 
 import { jevRequest, JevError } from "./client.js";
 import { buildQuestions } from "./questions.js";
-import { decide, featureMeta, FEATURES } from "./policy.js";
+import { decide } from "./policy.js";
 import { recordDecision } from "./log.js";
 import { featureMode, jevReady, jevSettings, jevUnavailableReason } from "./settings.js";
 
@@ -106,7 +104,7 @@ export async function jevJudge(feature, ctx = {}, opts = {}) {
     }
 
     const { route, confidence, reason } = decide(feature, response.answers, ctx);
-    const active = mode === "on" && route !== null;
+    const active = route !== null;
 
     let id = null;
     try {
@@ -153,16 +151,13 @@ export async function jevJudge(feature, ctx = {}, opts = {}) {
  * @param {object} ctx
  * @param {any} current  what the suite does today; returned unchanged unless the
  *                       feature is ON and the policy produced a route.
- * @returns {Promise<{route: any, source: "current"|"shadow"|"jev", confidence: number,
+ * @returns {Promise<{route: any, source: "current"|"jev", confidence: number,
  *                    proposed: any, answers: object|null, reason: string}>}
  */
 export async function jevRoute(feature, ctx, current) {
     const judged = await jevJudge(feature, ctx, { current });
     if (!judged.ok) {
         return { route: current, source: "current", confidence: 0, proposed: null, answers: null, reason: judged.reason, id: null };
-    }
-    if (judged.mode === "shadow") {
-        return { route: current, source: "shadow", confidence: judged.confidence, proposed: judged.route, answers: judged.answers, reason: judged.reason, id: judged.id };
     }
     if (judged.route === null) {
         return { route: current, source: "current", confidence: judged.confidence, proposed: null, answers: judged.answers, reason: judged.reason, id: judged.id };
@@ -180,12 +175,3 @@ export async function jevGate(feature, ctx, opts = {}) {
     return judged.route;
 }
 
-/** The inspector's "is this feature doing anything?" answer, without a call. */
-export function jevFeatureStates() {
-    const s = jevSettings();
-    const out = {};
-    for (const id of Object.keys(FEATURES)) {
-        out[id] = { mode: featureMode(id), configured: s.features[id] || "shadow", meta: featureMeta(id) };
-    }
-    return out;
-}

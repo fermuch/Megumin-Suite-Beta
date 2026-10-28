@@ -60,19 +60,6 @@ export const FEATURES = {
     "worker.triage": { stage: 3, label: "Worker failures", summary: "Say why a Chomusuke answer was unusable." },
 };
 
-export function featureMeta(id) {
-    return FEATURES[id] || { stage: 9, label: id, summary: "" };
-}
-
-export function featureIdsByStage() {
-    const stages = new Map();
-    for (const [id, meta] of Object.entries(FEATURES)) {
-        if (!stages.has(meta.stage)) stages.set(meta.stage, []);
-        stages.get(meta.stage).push(id);
-    }
-    return [...stages.entries()].sort((a, b) => a[0] - b[0]);
-}
-
 // ── Reading answers ─────────────────────────────────────────────────────────
 
 const num = v => (typeof v === "number" && Number.isFinite(v) ? v : null);
@@ -818,9 +805,4 @@ export function decide(feature, answers, ctx) {
         console.warn(`[Megumin-Suite] JEV policy "${feature}" failed.`, e);
         return { route: null, confidence: 0, reason: "policy error" };
     }
-}
-
-/** The labels a policy understands for a feature, for the inspector. */
-export function featureLabel(feature) {
-    return featureMeta(feature).label;
 }

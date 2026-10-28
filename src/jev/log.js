@@ -57,7 +57,7 @@ function write(list) {
  * Record one judgment.
  * @param {object} entry
  * @param {string} entry.feature
- * @param {string} entry.mode        off|shadow|on (the effective mode)
+ * @param {string} entry.mode        "on"; there is no shadow mode
  * @param {number} entry.version     question-set version
  * @param {string} entry.provider
  * @param {string} entry.model       the model the provider reported
@@ -79,7 +79,7 @@ export async function recordDecision(entry) {
         id,
         at: Date.now(),
         feature: entry.feature,
-        mode: entry.mode || "shadow",
+        mode: entry.mode || "on",
         version: entry.version || 0,
         provider: entry.provider || "",
         model: entry.model || "",
@@ -120,7 +120,7 @@ export async function clearDecisions() {
 }
 
 /** Per-feature counts: how often JEV's proposal matched the current route, and
- *  how the user labelled the shadow decisions they were shown. */
+ *  how the user labelled the decisions they were shown. */
 export function summarise(list) {
     const by = new Map();
     for (const row of list || []) {

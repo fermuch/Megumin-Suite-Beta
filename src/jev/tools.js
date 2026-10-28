@@ -107,10 +107,7 @@ export async function openSetupAssistant() {
             $rows.append($row);
         }
         $diff.append($rows);
-        const canApply = judged.mode === "on";
-        if (!canApply) $diff.append(`<div class="bgp-meta">Preview only: shadow mode is on (or the feature is in shadow). Turn shadow mode off and set the feature to on to apply.</div>`);
         const $apply = $(`<button type="button" class="menu_button" style="width:auto;margin:8px 0;">Apply these settings</button>`);
-        $apply.prop("disabled", !canApply);
         $apply.on("click", () => {
             if (!localProfile.storyConfig) localProfile.storyConfig = {};
             for (const [key, value] of Object.entries(diffs)) localProfile.storyConfig[key] = value;
@@ -154,10 +151,7 @@ export async function openLoadoutSuggestion() {
         const loadout = LOADOUTS.find(l => l.id === judged.route.loadout);
         if (!loadout) { $out.html(`<div class="bgp-meta">That loadout is no longer in the table.</div>`); return; }
         $out.append(`<div class="bgp-msg"><div><b>${esc(loadout.name)}</b><div class="bgp-meta">${esc(clip(loadout.why || "", 400))}</div></div></div>`);
-        const canApply = judged.mode === "on";
-        if (!canApply) $out.append(`<div class="bgp-meta">Preview only: shadow mode is on (or the feature is in shadow).</div>`);
         const $apply = $(`<button type="button" class="menu_button" style="width:auto;margin:8px 0;">Apply to this character</button>`);
-        $apply.prop("disabled", !canApply);
         $apply.on("click", () => {
             if (applyLoadoutForCharacter(loadout)) $apply.prop("disabled", true);
         });

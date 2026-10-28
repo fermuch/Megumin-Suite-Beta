@@ -3,9 +3,8 @@
 //
 // Everything lives where the rest of the extension keeps its settings: in
 // `extension_settings[extensionName].globalSettings.jev`, i.e. this user's
-// server-side settings.json. That is what makes features, provider, model,
-// shadow mode and the provider key follow the account across sessions and
-// browsers.
+// server-side settings.json. That is what makes the provider, model and the
+// provider key follow the account across sessions and browsers.
 //
 // The key is therefore plaintext at rest in the SillyTavern data directory, it
 // is part of the settings file and its backups, and it is sent to the browser on
@@ -23,9 +22,8 @@ import { extensionName } from "../core/constants.js";
 
 const STORAGE_KEY = "megumin_jev_key";
 
-// Feature mode values. "shadow" runs the judgment and logs it without acting; it
-// is the rollout state every proposal must go through before "on".
-export const MODES = ["off", "shadow", "on"];
+// There is no shadow mode and no per-feature setting: enabling the runtime
+// enables every decision, disabling it runs none of them.
 
 const DEFAULTS = {
     enabled: false,       // master switch for the whole runtime
@@ -33,33 +31,31 @@ const DEFAULTS = {
     provider: "openrouter",
     model: "jev-1.13",    // documented System One id on OpenRouter; the response reports what served it
     key: "",              // server-side, like every other JEV setting
-    shadow: true,         // force every feature into shadow regardless of its own mode
     logRaw: false,        // opt-in fixtures: keep the exact state sent, not just metadata
     vision: false,        // experimental (Dreamer-era) image input
     timeoutMs: 12000,
     maxCalls: 16,         // per user turn; a runaway turn should not become a bill
     contextBudget: 900,   // optional-context token budget for proposal 22 (0 = no budgeting)
-    features: {},         // { [featureId]: "off" | "shadow" | "on" }
 };
 
 // The provider key lives in jevSettings().key like every other JEV setting.
 
 export function jevSettings() {
     const store = extension_settings[extensionName];
-    if (!store) return { ...DEFAULTS, features: { ...DEFAULTS.features } };
+    if (!store) return { ...DEFAULTS };
     if (!store.globalSettings) store.globalSettings = {};
     const s = store.globalSettings;
     if (!s.jev || typeof s.jev !== "object") s.jev = {};
     const jev = s.jev;
-    // Earlier builds offered per-tab/browser key storage; the key is server-side
-    // now, so those flags are stale (the key itself is lifted in the UI once).
+    // Earlier builds offered per-tab/browser key storage and per-feature modes;
+    // both are gone, so those flags are stale (the browser key is lifted once).
     delete jev.keyStorage;
     delete jev.rememberKey;
+    delete jev.shadow;
+    delete jev.features;
     for (const [k, v] of Object.entries(DEFAULTS)) {
-        if (k === "features") continue;
         if (jev[k] === undefined) jev[k] = v;
     }
-    if (!jev.features || typeof jev.features !== "object") jev.features = {};
     // `jev-1.14.0` came from TypeSafe's model list but is not an id OpenRouter's
     // System One API accepts (400 "Model ... does not exist"); 1.13 is the id its
     // own System One example uses. Move the broken value once.
@@ -120,19 +116,9 @@ export function keyHint() {
 
 // ── Feature modes ───────────────────────────────────────────────────────────
 
-export function featureMode(id) {
-    const s = jevSettings();
-    if (!s.enabled || !s.optIn || !getJevKey()) return "off";
-    const own = MODES.includes(s.features[id]) ? s.features[id] : "shadow";
-    if (own === "off") return "off";
-    // The global shadow switch outranks a feature's "on": the rollout gate is the
-    // whole point of it, and a per-feature toggle must not be able to skip it.
-    return s.shadow ? "shadow" : own;
-}
-
-export function setFeatureMode(id, mode) {
-    const s = jevSettings();
-    s.features[id] = MODES.includes(mode) ? mode : "shadow";
+/** One answer for every decision: on when the runtime is ready, off otherwise. */
+export function featureMode() {
+    return jevReady() ? "on" : "off";
 }
 
 export function jevReady() {
