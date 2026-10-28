@@ -31,7 +31,7 @@ import { runWithChomusuke } from "../../engine/tasks.js";
 import { warnChomusuke } from "../../engine/chomusukeNotice.js";
 import { suiteEnabled } from "../../core/power.js";
 import { memGetCachedKeywords, memExtractKeywords, memStringHash } from "./keywords.js";
-import { memJevApplyPlan, memJevSkipRetrieval, memJevVerifySummary, memJevTagArchive } from "./jev.js";
+import { memJevApplyPlan, memJevSkipRetrieval, memJevVerifySummary, memJevTagArchive, memJevCandidateWidth } from "./jev.js";
 import {
     memGetCollectionId, memInsertToVectorDB, memDeleteFromVectorDB,
     memUpdateSemanticQuery, memUpdateSemanticQueryDebounced, currentSemanticMatches,
@@ -1499,7 +1499,7 @@ export function memGetRelevantVaultEntries() {
         return { ...v, score, matchedWords };
     });
 
-    const result = scoredVault.filter(s => s.score > 0).sort((a, b) => b.score - a.score).slice(0, 3);
+    const result = scoredVault.filter(s => s.score > 0).sort((a, b) => b.score - a.score).slice(0, memJevCandidateWidth());
     _vaultRetrievalCache = { key: cacheKey, result };
     return memJevApplyPlan(result);
 }

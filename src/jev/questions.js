@@ -98,9 +98,26 @@ const BUILDERS = {
         },
     }),
 
-    // P6 — re-rank the retrieved shortlist and route conflicts.
+    // P6 stage 1 — which of the wider retrieval pool is worth a full look?
+    "memory.pick": (ctx) => {
+        const candidates = (ctx.candidates || []).slice(0, 10);
+        const questions = {};
+        candidates.forEach((_, i) => {
+            questions[`c${i}_worth`] = noul(`Could memory ${i + 1} help answer or continue the user's current turn?`);
+        });
+        return {
+            version: 1,
+            state: {
+                question: text(ctx.question, 1500),
+                candidates: candidates.map(c => ({ id: text(c.id, 60), text: text(c.text, 240) })),
+            },
+            questions,
+        };
+    },
+
+    // P6 stage 2 — re-rank the picked memories and route conflicts.
     "memory.rerank": (ctx) => {
-        const memories = (ctx.memories || []).slice(0, 3);
+        const memories = (ctx.memories || []).slice(0, 4);
         const questions = {};
         memories.forEach((m, i) => {
             const at = `memory number ${i + 1}`;
@@ -270,6 +287,20 @@ const BUILDERS = {
         },
     }),
 
+    // P16 (names) — is an update's name a known character under another spelling?
+    "npc.match": (ctx) => {
+        const candidates = (ctx.candidates || []).slice(0, 3);
+        const questions = {};
+        candidates.forEach((c, i) => {
+            questions[`c${i}_same`] = noul(`The reply refers to a character as "${text(ctx.name, 120)}". Is that the same person as ${text(c.name, 120)} (${text(c.brief, 200)})?`);
+        });
+        return {
+            version: 1,
+            state: { name: text(ctx.name, 120) },
+            questions,
+        };
+    },
+
     // P16 (pairs) — same person or two people?
     "npc.identity": (ctx) => ({
         version: 1,
@@ -301,17 +332,17 @@ const BUILDERS = {
             );
             questions[`o${i}_wrong_entity`] = noul(`Does the reply attach that detail to a different character than ${ctx.npc}?`);
         });
-        if (ctx.lines && ctx.lines.length) {
+        (ctx.removals || []).slice(0, 6).forEach(r => {
             const criteria = {};
-            ctx.lines.slice(0, 8).forEach((l, i) => { criteria[`line${i + 1}`] = text(l, 200); });
+            (r.lines || []).slice(0, 8).forEach((l, i) => { criteria[`line${i + 1}`] = text(l, 200); });
             criteria.none = "None of these lines is the one the reply removed.";
-            questions.remove_target = choice(
-                `The reply asks to remove something from ${ctx.npc}'s ${text(ctx.fieldLabel, 60)}. Which existing line is it?`,
+            questions[`o${r.index}_target`] = choice(
+                `The reply asks to remove something from ${ctx.npc}'s ${text(r.fieldLabel, 60)}. Which existing line is it?`,
                 criteria,
             );
-        }
+        });
         return {
-            version: 1,
+            version: 2,
             state: {
                 reply: text(ctx.reply, 5000),
                 npc: { name: text(ctx.npc, 120), dossier: text(ctx.dossier, 1500) },
@@ -390,7 +421,7 @@ const BUILDERS = {
 
     // P22 — semantic context budgeting over optional candidates.
     "context.budget": (ctx) => {
-        const candidates = (ctx.candidates || []).slice(0, 12);
+        const candidates = (ctx.candidates || []).slice(0, 20);
         const questions = {};
         candidates.forEach((c, i) => {
             questions[`c${i}_utility`] = score(`For the reply about to be written, how useful is optional context candidate ${i + 1} (${c.kind})?`, UTILITY);
@@ -454,6 +485,28 @@ const BUILDERS = {
             continuity_term: noul("Is `phrase` a name, place, object, or setting term whose absence would break continuity?"),
         },
     }),
+
+    // P26 (after parsing) — do the dice lines and the prose agree?
+    "dice.verify": (ctx) => {
+        const rolls = (ctx.rolls || []).slice(0, 6);
+        const questions = {};
+        rolls.forEach((r, i) => {
+            questions[`r${i}_honored`] = noul(`The dice line says "${text(r.line, 200)}". Does the prose that follows show that result, without contradicting it?`);
+            questions[`r${i}_outcome`] = choice(`Which outcome does the verdict wording "${text(r.verdict, 120)}" describe?`, {
+                success: "Success.",
+                cost: "Success, but at a cost or complication.",
+                fail: "Failure.",
+                crit: "Critical success.",
+                critfail: "Critical failure.",
+                unclear: "The wording does not clearly say.",
+            });
+        });
+        return {
+            version: 1,
+            state: { reply: text(ctx.reply, 5000) },
+            questions,
+        };
+    },
 
     // P26 — the primary player attempt of the turn.
     "dice.assess": (ctx) => ({

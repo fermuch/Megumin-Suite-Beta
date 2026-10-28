@@ -34,6 +34,14 @@ let queryDecision = { key: "", value: null };
 
 let plan = { key: "", active: false, drop: new Set(), order: [], conflicts: new Set() };
 
+// Retrieval widens only when the JEV pick is actually allowed to act; shadow or
+// off keeps the historical three, so a widened pool can never leak into a prompt.
+const CANDIDATE_WIDTH = 10;
+
+export function memJevCandidateWidth() {
+    return featureMode("memory.pick") === "on" ? CANDIDATE_WIDTH : 3;
+}
+
 function clean(text) {
     return cleanText(text);
 }
@@ -99,7 +107,29 @@ export async function memJevRerankShortlist(getShortlist) {
         return null;
     }
 
-    const key = `${turn.key}#${list.map(x => x.id).join(",")}`;
+    // Stage 1 — pick from the wider pool. Off/shadow/failure/unsure keeps the
+    // first three, which is exactly what retrieval used to hand over.
+    if (featureMode("memory.pick") !== "off" && list.length > 3) {
+        const picked = await jevRoute(
+            "memory.pick",
+            {
+                question: turn.latestUser || turn.recentExchange,
+                candidates: list.map(m => ({ id: m.id, text: m.text || m.summary || "" })),
+            },
+            list.slice(0, 3).map(m => m.id),
+        );
+        if (picked.route && Array.isArray(picked.route.ids)) {
+            const byId = new Map(list.map(m => [m.id, m]));
+            list = picked.route.ids.map(id => byId.get(id)).filter(Boolean);
+            if (!list.length) {
+                // A confident "none of these help" is a decision: inject nothing.
+                plan = { key: `${turn.key}#picked-none`, active: true, drop: new Set(), order: [], conflicts: new Set() };
+                return plan;
+            }
+        }
+    }
+
+    const key = `${turn.key}#${list.map(x => x.id).join(",")}#${featureMode("memory.pick")}/${featureMode("memory.rerank")}`;
     if (plan.key === key) return plan;
 
     const current = list.map((_, i) => i);
@@ -129,11 +159,16 @@ export async function memJevRerankShortlist(getShortlist) {
 /** Applies the current plan to a retrieval result. Sync, cheap, identity-checked
  *  by the plan key: a stale plan for another turn cannot filter this one. */
 export function memJevApplyPlan(list) {
-    if (!plan.active || !Array.isArray(list) || !list.length) return list;
+    if (!Array.isArray(list) || !list.length) return list;
+    if (!plan.active) {
+        // A widened pool that never got a plan must not reach the prompt.
+        return list.slice(0, 3);
+    }
+    if (!plan.order.length) return [];
     const ranked = plan.order.filter(id => list.some(x => x.id === id));
-    if (!ranked.length) return list;
+    if (!ranked.length) return [];
     const byId = new Map(list.map(x => [x.id, x]));
-    return ranked.map(id => byId.get(id)).filter(x => x && !plan.drop.has(x.id));
+    return ranked.map(id => byId.get(id)).filter(x => x && !plan.drop.has(x.id)).slice(0, 3);
 }
 
 /** Ids the policy flagged as conflicting or superseded, for prompt labelling. */

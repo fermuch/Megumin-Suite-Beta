@@ -11,7 +11,7 @@ import { getCharacterKey, meguminActiveDataIdentity } from "../../core/keys.js";
 import { showKazumaProgress } from "../../ui/progress.js";
 import { meguminCleanChatHistoryText } from "../../engine/chatText.js";
 import { memGetCachedKeywords, memStringHash } from "./keywords.js";
-import { memJevStrategyValue } from "./jev.js";
+import { memJevStrategyValue, memJevCandidateWidth } from "./jev.js";
 
 // NOTE: memGetEmbedding / memUpdateCurrentQueryVector / memUpdateVaultEmbeddings removed.
 // ST's native /api/vector/* API does NOT expose raw embeddings. Embedding is done server-side
@@ -287,7 +287,7 @@ export async function memUpdateSemanticQuery() {
                     if (!entry || seen.has(entry.id)) continue;
                     seen.add(entry.id);
                     currentSemanticMatches.push({ ...entry, score: 99, matchedWords: ["Semantic Embedding Match (Vectra)"] });
-                    if (currentSemanticMatches.length >= 3) break;
+                    if (currentSemanticMatches.length >= memJevCandidateWidth()) break;
                 }
             }
         }

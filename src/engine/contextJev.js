@@ -22,7 +22,7 @@ import { featureMode, jevSettings } from "../jev/settings.js";
 // footer agree to within rounding.
 export const estimateTokens = text => Math.ceil(String(text || "").length / 4);
 
-let plan = { key: "", active: false, dropMemory: new Set(), dropNpc: new Set(), rows: [], budget: 0, used: 0, at: 0 };
+let plan = { key: "", active: false, dropMemory: new Set(), dropNpc: new Set(), dropAddons: new Set(), rows: [], budget: 0, used: 0, at: 0 };
 
 export function contextJevPlan() {
     return plan;
@@ -36,8 +36,12 @@ export function contextJevDroppedNpcNames() {
     return plan.active ? plan.dropNpc : new Set();
 }
 
+export function contextJevDroppedAddonIds() {
+    return plan.active ? plan.dropAddons : new Set();
+}
+
 export function contextJevReset() {
-    plan = { key: "", active: false, dropMemory: new Set(), dropNpc: new Set(), rows: [], budget: 0, used: 0, at: 0 };
+    plan = { key: "", active: false, dropMemory: new Set(), dropNpc: new Set(), dropAddons: new Set(), rows: [], budget: 0, used: 0, at: 0 };
 }
 
 /**
@@ -67,7 +71,7 @@ export async function contextJevPrepare(question, list, { budget } = {}) {
         candidates.map(c => c.id),
     );
     if (result.source !== "jev" || !result.route) {
-        plan = { key, active: false, dropMemory: new Set(), dropNpc: new Set(), rows: [], budget: limit, used: 0, at: Date.now() };
+        plan = { key, active: false, dropMemory: new Set(), dropNpc: new Set(), dropAddons: new Set(), rows: [], budget: limit, used: 0, at: Date.now() };
         return plan;
     }
     const values = new Map((result.route.rows || []).map(r => [r.id, r.value ?? 0]));
@@ -87,22 +91,25 @@ export async function contextJevPrepare(question, list, { budget } = {}) {
     }
     // Nothing fits: do not starve the prompt. Fall back to the full assembly.
     if (!keep.size) {
-        plan = { key, active: false, dropMemory: new Set(), dropNpc: new Set(), rows: [], budget: limit, used: 0, at: Date.now() };
+        plan = { key, active: false, dropMemory: new Set(), dropNpc: new Set(), dropAddons: new Set(), rows: [], budget: limit, used: 0, at: Date.now() };
         return plan;
     }
 
     const dropMemory = new Set();
     const dropNpc = new Set();
+    const dropAddons = new Set();
     for (const candidate of candidates) {
         if (keep.has(candidate.id)) continue;
         if (candidate.kind === "memory") dropMemory.add(candidate.ref);
         if (candidate.kind === "npc") dropNpc.add(candidate.ref);
+        if (candidate.kind === "addon") dropAddons.add(candidate.ref);
     }
     plan = {
         key,
-        active: dropMemory.size + dropNpc.size > 0,
+        active: dropMemory.size + dropNpc.size + dropAddons.size > 0,
         dropMemory,
         dropNpc,
+        dropAddons,
         rows: candidates.map(c => ({ id: c.id, kind: c.kind, tokens: c.tokens || estimateTokens(c.text), keep: keep.has(c.id) })),
         budget: limit,
         used,

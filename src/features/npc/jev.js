@@ -125,18 +125,17 @@ export async function npcJevIdentity(left, right) {
  * Verify parsed dossier operations against the reply.
  * @returns {Promise<null|{verdicts: object[], target: object|null}>}
  */
-export async function npcJevVerifyOps({ reply, npc, dossier, ops, lines, fieldLabel }) {
+export async function npcJevVerifyOps({ reply, npc, dossier, ops, removals }) {
     if (!Array.isArray(ops) || !ops.length) return null;
     const judged = await jevJudge("npc.updates", {
         reply,
         npc,
         dossier,
         ops: ops.map(o => ({ op: o.op, label: o.label, text: o.text })),
-        lines,
-        fieldLabel,
+        removals,
     });
     if (!judged.ok || judged.mode !== "on" || !judged.route) return null;
-    return { verdicts: judged.route.verdicts || [], target: judged.route.target || null };
+    return { verdicts: judged.route.verdicts || [], targets: judged.route.targets || [] };
 }
 
 /**
@@ -149,13 +148,40 @@ export async function npcJevCheckPrompt({ name, dossier, outfit, prompt, framing
     return { issues: judged.route.issues || [], active: true };
 }
 
-function removalPool(npc, ops) {
-    const removal = ops.find(o => o && o.op === "-");
-    if (!removal) return { lines: [], fieldLabel: "" };
-    const field = npcUpdatableFields().find(f => String(f.label).toLowerCase() === String(removal.label).toLowerCase());
-    if (!field) return { lines: [], fieldLabel: "" };
-    const lines = String(npc[field.id] || "").split(/\r?\n/).map(l => l.replace(/^\s*[*,-]\s*/, "").trim()).filter(Boolean);
-    return { lines: lines.slice(0, 8), fieldLabel: field.label };
+/** One pool per removal op, so every "-" is resolved against its own field. */
+function removalPools(npc, ops) {
+    const fields = npcUpdatableFields();
+    const pools = [];
+    ops.forEach((op, index) => {
+        if (!op || op.op !== "-") return;
+        const field = fields.find(f => String(f.label).toLowerCase() === String(op.label).toLowerCase());
+        if (!field) return;
+        const lines = String(npc[field.id] || "")
+            .split(/\r?\n/)
+            .map(l => l.replace(/^\s*[*,-]\s*/, "").trim())
+            .filter(Boolean);
+        pools.push({ index, fieldLabel: field.label, lines: lines.slice(0, 8) });
+    });
+    return pools;
+}
+
+/** Resolve an update addressed to a name the bank does not have, via identity. */
+export async function npcJevResolveName(name) {
+    if (featureMode("npc.match") === "off") return null;
+    const npcs = (localProfile?.npcBank?.npcs || []).filter(n => n && n.name);
+    const lower = String(name || "").toLowerCase().trim();
+    if (!lower) return null;
+    const candidates = npcs.filter(n => {
+        const other = String(n.name).toLowerCase();
+        return other !== lower && (other.startsWith(lower.slice(0, 3)) || lower.startsWith(other.slice(0, 3)) || other.includes(lower) || lower.includes(other));
+    }).slice(0, 3);
+    if (!candidates.length) return null;
+    const judged = await jevJudge("npc.match", {
+        name,
+        candidates: candidates.map(n => ({ name: n.name, brief: briefOf(n) })),
+    });
+    if (!judged.ok || judged.mode !== "on" || !judged.route) return null;
+    return judged.route.name || null;
 }
 
 /**
@@ -169,36 +195,51 @@ export async function npcFilterUpdates(updates, reply) {
     if (featureMode("npc.updates") === "off") return updates;
     const out = [];
     for (const update of updates) {
-        const npc = npcFindByName(update.name);
+        let npc = npcFindByName(update.name);
+        let resolvedName = update.name;
+        if (!npc) {
+            const resolved = await npcJevResolveName(update.name);
+            if (resolved) { npc = npcFindByName(resolved); resolvedName = resolved; }
+        }
         if (!npc || !Array.isArray(update.ops) || !update.ops.length) { out.push(update); continue; }
-        const pool = removalPool(npc, update.ops);
+        const removals = removalPools(npc, update.ops);
         const checked = await npcJevVerifyOps({
             reply,
             npc: npc.name,
             dossier: candidateText(npc),
             ops: update.ops,
-            lines: pool.lines,
-            fieldLabel: pool.fieldLabel,
+            removals,
         });
-        if (!checked) { out.push(update); continue; }
+        if (!checked) {
+            out.push(resolvedName !== update.name ? { ...update, name: resolvedName } : update);
+            continue;
+        }
 
         const kept = [];
         update.ops.forEach((op, i) => {
             const verdict = checked.verdicts.find(v => v.index === i);
-            if (!verdict || verdict.verdict === "accept") kept.push({ ...op });
+            if (!verdict || verdict.verdict === "accept") kept.push({ op: { ...op }, index: i });
         });
         if (!kept.length) {
             console.debug(`[Megumin-Suite] NPC update for "${npc.name}" not applied: the reply did not support it.`);
             continue;
         }
-        // A removal target chosen from the existing lines, by index. The parser's
-        // own matcher then finds that exact line, so nothing is invented.
-        if (checked.target && checked.target.line && /^line\d+$/.test(checked.target.line)) {
-            const index = Number(checked.target.line.slice(4)) - 1;
-            const line = pool.lines[index];
-            if (line) for (const op of kept) if (op.op === "-") op.text = line;
+
+        // Every removal is resolved from that field's existing lines. "none"
+        // means the line is not there and the op is dropped; a chosen line is
+        // rewritten to its exact text, so the parser's matcher cannot guess.
+        const targets = new Map((checked.targets || []).map(t => [t.index, t]));
+        const finalOps = [];
+        for (const { op, index } of kept) {
+            if (op.op === "-") {
+                const target = targets.get(index);
+                if (target && target.none) continue;
+                if (target && target.line) op.text = target.line;
+            }
+            finalOps.push(op);
         }
-        out.push({ ...update, ops: kept });
+        if (!finalOps.length) continue;
+        out.push({ ...update, name: resolvedName, ops: finalOps });
     }
     return out;
 }

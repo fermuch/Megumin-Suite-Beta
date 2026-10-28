@@ -7,7 +7,7 @@
 // A directive is never rewritten: a rejected one goes back to the editor.
 // ────────────────────────────────────────────────────────────────────────────
 
-import { jevJudge, jevRoute } from "../../jev/index.js";
+import { jevJudge } from "../../jev/index.js";
 import { featureMode } from "../../jev/settings.js";
 
 /**
@@ -15,11 +15,11 @@ import { featureMode } from "../../jev/settings.js";
  * @returns {Promise<null|{action: "evolve"|"hold"|"stalled", ...}>}
  */
 export async function jevArcSignal({ tracker, directive, exchange }) {
-    if (featureMode("director.arc") === "off") return null;
-    if (!directive) return null;
-    const result = await jevRoute("director.arc", { tracker, directive, exchange }, { action: "hold" });
-    if (result.source !== "jev" || !result.route) return null;
-    return result.route;
+    if (featureMode("director.arc") === "off" || !directive) return null;
+    const judged = await jevJudge("director.arc", { tracker, directive, exchange }, { current: { action: "hold" } });
+    // Only a confident ON answer is allowed to overrule the regex/frequency.
+    if (!judged.ok || judged.mode !== "on" || !judged.route) return null;
+    return judged.route;
 }
 
 /**

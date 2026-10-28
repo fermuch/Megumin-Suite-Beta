@@ -42,10 +42,10 @@ README on the stable branch.
 ### What it decides
 
 - **Memory** — the query strategy for the turn (latest question, recent
-  exchange, or no retrieval), re-ranking and dropping the retrieved shortlist,
-  checking a generated summary against its chunk, and flagging duplicate or
-  superseded archives instead of deleting them — two-stage now: JEV picks the
-  candidate archives first, so a contradiction worded differently is not missed.
+  exchange, or no retrieval); a wider retrieval pool that JEV shortlists before
+  re-ranking and dropping; summary checks against the chunk; and duplicate or
+  superseded archives flagged instead of deleted — two-stage, so a contradiction
+  worded differently is not missed.
 - **State and cards** — verifying parsed World State changes and Notebook clues
   against the reply, checking parsed Blocks for meaning (after the sanitizers),
   and naming *why* a Chomusuke answer was unusable (refusal, truncation, wrong
@@ -54,21 +54,27 @@ README on the stable branch.
   (name + one line each), then full-dossier ranking of up to five survivors for
   dossiers and image tags. The old keyword shortlist is only the fallback. Plus a
   gate on creating a dossier for a background extra, verification of dossier
-  changes, and a portrait/outfit-tag review before ComfyUI.
-- **Story Director** — whether the arc is complete, stalled or redirected
-  (combined with the tracker and frequency rules), and a check on a generated
-  directive before it is saved.
+  changes (each removal resolved against its own field's existing lines, and an
+  update addressed to an unknown name checked through identity), and a
+  portrait/outfit-tag review before ComfyUI.
+- **Story Director** — whether the arc is complete, stalled or redirected. When
+  JEV is confident it decides in both directions; the tracker regex and the
+  frequency counter are the fallback. Generated directives are checked before
+  saving.
 - **Dice** — for the player-only dice add-on, whether the user's primary attempt
   needs a roll, its difficulty band and competence. Code rolls, maps the band to
   the existing DC ladder and writes the resolved line; later and NPC attempts
-  keep the story model's judgment.
+  keep the story model's judgment. After parsing, each dice line's verdict and
+  the prose that follows it are checked against each other (reported, never
+  rewritten).
 - **Images** — skip the conditional image writer when nothing photo-worthy
   happened, review an image prompt before it costs a render, and (experimental,
   off) review the render itself.
 - **Tools** — Setup assistant (your words → existing Story Config options, as a
   diff), Model loadout suggestion (from the tested table only), Add-on
-  diagnostics, Reply Doctor with swipe ranking, and a context-budget preview.
-  Each proposes; nothing applies until you press the button.
+  diagnostics, Reply Doctor with swipe ranking, and a context-budget preview
+  (memory, NPC dossiers and optional add-on prose as candidates). Each proposes;
+  nothing applies until you press the button.
 
 ### The Decision Inspector
 

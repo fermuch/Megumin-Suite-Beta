@@ -134,6 +134,7 @@ import { getReplyAssessment, setAssessmentContextProvider } from "./src/jev/asse
 import { setImageCastProvider } from "./src/features/imagegen/jev.js";
 import { npcJevWorthDossier, npcFilterUpdates } from "./src/features/npc/jev.js";
 import { jevArcSignal, jevCheckDirective, directiveWarningText } from "./src/features/storyplan/jev.js";
+import { verifyDiceReply } from "./src/features/blocks/jevDiceVerify.js";
 import { currentImageCast } from "./src/features/imagegen/v2/index.js";
 import {
     meguminDecorateMessageBody, meguminRefreshBlocksInChat, meguminScheduleBlocksRefresh,
@@ -559,6 +560,10 @@ jQuery(async () => {
                     if (await stateOnMessageReceived(receivedId, receivedType, {
                         skipSideRead: emptyReply || Boolean(combinedTurn && combinedTurn.world) || Boolean(av && av.worldFactsChanged === false),
                     })) meguminScheduleBlocksRefresh();
+                    // P26 after parsing: do the dice lines and the prose agree?
+                    if (!emptyReply) {
+                        verifyDiceReply(cleanAIOutput(String(replyNow.mes || ""))).catch(() => {});
+                    }
                     // Image Gen V2: a character who just arrived gets a look.
                     v2LooksForArrivals();
                 } catch (e) {
@@ -660,15 +665,22 @@ jQuery(async () => {
                             // then combine with the tracker and frequency above.
                             // JEV can only ASK for an evolve the existing triggers
                             // did not ask for; it never cancels one they did.
-                            if (!needsEvolve && sp.triggerMode !== 'manual' && sp.currentPlan) {
+                            if (sp.triggerMode !== 'manual' && sp.currentPlan) {
                                 const signal = await jevArcSignal({
                                     tracker: sp.lastTrackerState || "",
                                     directive: sp.currentPlan || "",
                                     exchange: cleanAIOutput(String(lastMsg.mes || "")).slice(-6000),
                                 });
-                                if (signal && signal.action === "evolve") {
-                                    needsEvolve = true;
-                                    console.log(`[${extensionName}] 🎬 JEV read the arc as complete or redirected. Triggering smart auto-evolve.`);
+                                // When JEV is confident it decides, in both directions:
+                                // a "stalled"/"hold" outranks a tracker regex that said
+                                // completed, and "evolve" outranks a missing tracker.
+                                // null = not confident, so the regex/frequency stands.
+                                if (signal) {
+                                    const evolve = signal.action === "evolve";
+                                    if (evolve !== needsEvolve) {
+                                        console.log(`[${extensionName}] 🎬 JEV read the arc as ${signal.action}; ${evolve ? "evolving" : "holding"} instead of the tracker.`);
+                                    }
+                                    needsEvolve = evolve;
                                 }
                             }
 

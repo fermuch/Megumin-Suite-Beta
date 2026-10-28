@@ -29,6 +29,7 @@ import { npcBuildTextFromData } from "../features/npc/data.js";
 import { diceJevPrepare } from "../features/blocks/jevDice.js";
 import { contextJevPrepare, estimateTokens } from "./contextJev.js";
 import { meguminCleanChatHistoryText } from "./chatText.js";
+import { hardcodedLogic } from "../../data/database.js";
 import { npcBuildDossierPrompt } from "../features/npc/fields.js";
 import { escapeRegex } from "../utils/regex.js";
 import { buildBaseDict } from "./buildBaseDict.js";
@@ -431,6 +432,15 @@ async function buildPromptInjection(data, type) {
             for (const m of memGetRelevantVaultEntries() || []) {
                 const text = String(m.text || m.summary || "");
                 list.push({ id: `memory:${m.id}`, kind: "memory", text, tokens: estimateTokens(text), ref: m.id });
+            }
+            // Optional add-on prose is context too: it can earn or lose its
+            // tokens like a memory. Dice add-ons are mechanics, not candidates.
+            for (const id of localProfile.addons || []) {
+                const item = hardcodedLogic.addons.find(a => a.id === id);
+                if (!item || item.rolls) continue;
+                const text = String(item.content || "");
+                if (!text) continue;
+                list.push({ id: `addon:${id}`, kind: "addon", text, tokens: estimateTokens(text), ref: id });
             }
             const npcPlan = npcJevRankPlan();
             if (npcPlan.active) {

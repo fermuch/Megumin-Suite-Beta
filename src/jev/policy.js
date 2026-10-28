@@ -23,7 +23,8 @@ import { thresholdFor } from "./settings.js";
 
 export const FEATURES = {
     "memory.query": { stage: 2, label: "Memory query", summary: "Choose latest question, recent exchange, or no retrieval." },
-    "memory.rerank": { stage: 2, label: "Memory re-ranking", summary: "Rank, drop, and separate conflicting retrieved memories." },
+    "memory.pick": { stage: 2, label: "Memory shortlist", summary: "Pick which retrieved memories are worth a full re-rank." },
+    "memory.rerank": { stage: 2, label: "Memory re-ranking", summary: "Rank, drop, and separate conflicting picked memories." },
     "memory.summary": { stage: 2, label: "Memory summaries", summary: "Check a generated summary against its source chunk before filing it." },
     "memory.shortlist": { stage: 2, label: "Archive shortlist", summary: "Pick which existing archives could share the new one's subject." },
     "memory.archive": { stage: 2, label: "Archive duplicates", summary: "Link, flag, or route duplicate and superseded archives." },
@@ -32,6 +33,7 @@ export const FEATURES = {
     "npc.shortlist": { stage: 2, label: "NPC shortlist", summary: "Pick which of the whole bank is worth a full dossier ranking." },
     "npc.rank": { stage: 2, label: "NPC relevance", summary: "Rank the shortlisted dossiers and image tags by this scene." },
     "npc.dossier": { stage: 3, label: "New NPC gate", summary: "Only create a dossier for a named, recurring character." },
+    "npc.match": { stage: 3, label: "NPC names", summary: "Resolve an update's name to a known character under another spelling." },
     "npc.identity": { stage: 3, label: "Identity merge", summary: "Suggest, never apply, when two NPC records look like one person." },
     "npc.updates": { stage: 3, label: "NPC updates", summary: "Check a dossier change against the reply, and resolve removal targets." },
     "npc.prompt": { stage: 3, label: "Portrait prompts", summary: "Review a portrait prompt and outfit tags before rendering." },
@@ -43,6 +45,7 @@ export const FEATURES = {
     "addons.diagnose": { stage: 4, label: "Add-on diagnostics", summary: "Spot which enabled add-on a reply broke." },
     "banlist.candidate": { stage: 2, label: "Ban list", summary: "Triage suggested phrases into ban, review, or keep." },
     "dice.assess": { stage: 3, label: "Dice", summary: "Decide whether the user's primary attempt needs a roll, and its difficulty." },
+    "dice.verify": { stage: 3, label: "Dice results", summary: "Check that each dice line and the prose tell the same story." },
     "reply.doctor": { stage: 4, label: "Reply Doctor", summary: "Explain which quality check a reply failed." },
     "reply.swipes": { stage: 4, label: "Swipe ranking", summary: "Rank existing swipes with the same rubric, without choosing." },
     "image.gate": { stage: 2, label: "Image gate", summary: "Skip the image writer when nothing photo-worthy happened." },
@@ -155,8 +158,22 @@ const POLICIES = {
         return { route: { strategy }, confidence, reason: strategy };
     },
 
+    "memory.pick": (answers, ctx) => {
+        const candidates = (ctx.candidates || []).slice(0, 10);
+        if (!candidates.length) return { route: null, confidence: 0, reason: "nothing retrieved" };
+        const ids = candidates.map((_, i) => `c${i}_worth`);
+        if (!have(answers, ids)) return { route: null, confidence: 0, reason: "incomplete" };
+        const rows = candidates.map((c, i) => ({ id: c.id, p: noul(answers, `c${i}_worth`) ?? 0 }));
+        const keep = rows.filter(r => r.p >= 0.5).sort((a, b) => b.p - a.p).slice(0, 4);
+        const certainNone = rows.every(r => r.p <= 0.3);
+        if (!keep.length && !certainNone) return { route: null, confidence: 0, reason: "uncertain" };
+        const used = keep.length ? keep : rows;
+        const confidence = clamp01(used.reduce((sum, r) => sum + certainty(r.p), 0) / used.length);
+        return { route: { ids: keep.map(r => r.id), rows }, confidence, reason: keep.length ? "picked" : "none" };
+    },
+
     "memory.rerank": (answers, ctx) => {
-        const memories = (ctx.memories || []).slice(0, 3);
+        const memories = (ctx.memories || []).slice(0, 4);
         if (!memories.length) return { route: null, confidence: 0, reason: "nothing to rank" };
         const ids = [];
         memories.forEach((_, i) => ids.push(`r${i}_relevance`, `r${i}_utility`));
@@ -187,6 +204,27 @@ const POLICIES = {
             confidence,
             reason: "ranked",
         };
+    },
+
+    "dice.verify": (answers, ctx) => {
+        const rolls = (ctx.rolls || []).slice(0, 6);
+        if (!rolls.length) return { route: null, confidence: 0, reason: "no rolls" };
+        const ids = [];
+        rolls.forEach((_, i) => ids.push(`r${i}_honored`, `r${i}_outcome`));
+        if (!have(answers, ids)) return { route: null, confidence: 0, reason: "incomplete" };
+
+        const issues = [];
+        let low = 1;
+        rolls.forEach((r, i) => {
+            const honored = noul(answers, `r${i}_honored`) ?? 0;
+            const outcome = pick(answers, `r${i}_outcome`);
+            low = Math.min(low, certainty(honored), choiceConfidence(answers, `r${i}_outcome`));
+            if (honored < 0.5) issues.push(`roll ${i + 1}: prose does not honour "${r.verdict}"`);
+            if (outcome && outcome !== "unclear" && outcome !== r.outcome) {
+                issues.push(`roll ${i + 1}: verdict reads as ${outcome}, computed ${r.outcome}`);
+            }
+        });
+        return { route: { issues }, confidence: clamp01(low), reason: issues.length ? issues.join("; ") : "consistent" };
     },
 
     "memory.summary": (answers) => {
@@ -345,6 +383,21 @@ const POLICIES = {
         return { route: { create, suggestExisting: suggest, named, worth, exists }, confidence, reason: create ? "create" : suggest ? "existing" : "skip" };
     },
 
+    "npc.match": (answers, ctx) => {
+        const candidates = (ctx.candidates || []).slice(0, 3);
+        if (!candidates.length) return { route: null, confidence: 0, reason: "no candidates" };
+        const ids = candidates.map((_, i) => `c${i}_same`);
+        if (!have(answers, ids)) return { route: null, confidence: 0, reason: "incomplete" };
+        const rows = candidates.map((c, i) => ({ name: c.name, p: noul(answers, `c${i}_same`) ?? 0 }));
+        const best = [...rows].sort((a, b) => b.p - a.p)[0];
+        if (best.p >= 0.7) return { route: { name: best.name }, confidence: clamp01(certainty(best.p)), reason: "same" };
+        if (rows.every(r => r.p <= 0.3)) {
+            const confidence = clamp01(rows.reduce((sum, r) => sum + certainty(r.p), 0) / rows.length);
+            return { route: { name: null }, confidence, reason: "different" };
+        }
+        return { route: null, confidence: 0, reason: "uncertain" };
+    },
+
     "npc.identity": (answers) => {
         const relation = num(scoreValue(answers, "relation"));
         if (relation === null || !have(answers, ["field_agree"])) return { route: null, confidence: 0, reason: "incomplete" };
@@ -370,12 +423,23 @@ const POLICIES = {
             const hold = support === "contradicted" || wrong >= 0.6;
             return { index: i, verdict: accept ? "accept" : hold ? "hold" : "review", support, wrong, confidence };
         });
-        const target = answers.remove_target && answers.remove_target.type === "choice"
-            ? { line: answers.remove_target.choice, confidence: answers.remove_target.confidence }
-            : null;
+        const targets = [];
+        for (const r of (ctx.removals || []).slice(0, 6)) {
+            const a = answers[`o${r.index}_target`];
+            if (!a || a.type !== "choice") continue;
+            const lineNo = /^line(\d+)$/.test(a.choice) ? Number(a.choice.slice(4)) - 1 : null;
+            targets.push({
+                index: r.index,
+                choice: a.choice,
+                line: lineNo !== null ? r.lines[lineNo] : null,
+                none: a.choice === "none",
+                confidence: a.confidence,
+            });
+        }
+        const certs = verdicts.map(v => v.confidence).concat(targets.map(t => t.confidence));
         return {
-            route: { verdicts, target },
-            confidence: verdicts.length ? Math.min(...verdicts.map(v => v.confidence)) : 0,
+            route: { verdicts, targets },
+            confidence: certs.length ? Math.min(...certs) : 0,
             reason: "checked",
         };
     },
@@ -449,7 +513,7 @@ const POLICIES = {
     },
 
     "context.budget": (answers, ctx) => {
-        const candidates = (ctx.candidates || []).slice(0, 12);
+        const candidates = (ctx.candidates || []).slice(0, 20);
         if (!candidates.length) return { route: null, confidence: 0, reason: "no candidates" };
         const ids = [];
         candidates.forEach((_, i) => ids.push(`c${i}_utility`));

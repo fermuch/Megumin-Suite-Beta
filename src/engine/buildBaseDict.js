@@ -27,7 +27,7 @@ import { memGetRelevantVaultEntries } from "../features/memory/index.js";
 import { memJevConflictIds } from "../features/memory/jev.js";
 import { npcJevRankPlan } from "../features/npc/jev.js";
 import { diceJevResolve, diceJevInstruction, diceJevActive } from "../features/blocks/jevDice.js";
-import { contextJevDroppedMemoryIds, contextJevDroppedNpcNames } from "./contextJev.js";
+import { contextJevDroppedMemoryIds, contextJevDroppedNpcNames, contextJevDroppedAddonIds } from "./contextJev.js";
 import { meguminRollD20s } from "../utils/dice.js";
 import { meguminOverridableSlots, meguminSlotIsLive, meguminModuleTrigger, meguminSlotByTrigger } from "../../data/slots.js";
 import { thinkingSection, formattingSection, bannedSection, reminderSection, thisTurnSection } from "./presetSections.js";
@@ -128,9 +128,10 @@ export function buildBaseDict(isTokenCount = false) {
     // is never wiped, and with no style picked it falls back to V11 Default.
     dict["[[style]]"] = String(localProfile.aiRule || "").trim()
         || (hardcodedLogic.directStyles.find(s => s.id === "dir_v11") || {}).rule || "";
+    const addonBudgetDrops = contextJevDroppedAddonIds();
     localProfile.addons.forEach(aId => {
         const item = hardcodedLogic.addons.find(a => a.id === aId);
-        if (item) dict[item.trigger] = item.content;
+        if (item) dict[item.trigger] = addonBudgetDrops.has(aId) ? "" : item.content;
     });
 
 
