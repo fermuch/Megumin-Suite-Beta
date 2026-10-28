@@ -1,14 +1,18 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // JEV settings and credentials.
 //
-// The doc's transport decision (docs/jev.md): per-user keys only, session-only by
-// default, persistent storage only after an explicit "remember on this browser"
-// choice — and then in the BROWSER's localStorage, never in extension_settings,
-// presets, profiles, logs or error text. So:
+// Everything lives where the rest of the extension keeps its settings: in
+// `extension_settings[extensionName].globalSettings.jev`, i.e. this user's
+// server-side settings.json. That is what makes features, provider, model,
+// shadow mode and the provider key follow the account across sessions and
+// browsers.
 //
-//   session    memory in this page (gone on reload)      ← default
-//   remembered localStorage under STORAGE_KEY            ← explicit opt-in
-//   never      getSettings() / the profile / the log
+// The key is therefore plaintext at rest in the SillyTavern data directory, it
+// is part of the settings file and its backups, and it is sent to the browser on
+// page load like every other setting. This is a deliberate change from
+// docs/jev.md's original "never in extension_settings" rule, requested by the
+// maintainer. What still never happens: the key is not copied into extension
+// profiles, presets, the decision log, diagnostics exports, or error text.
 //
 // `getSettings()` hands back the live object the settings tab writes to; every
 // field is defaulted here so a feature never has to guess whether it is set.
@@ -28,7 +32,7 @@ const DEFAULTS = {
     optIn: false,         // explicit consent to send story text to a third party
     provider: "openrouter",
     model: "jev-1.14.0",  // pinned: thresholds are only valid for the model they were tuned on
-    rememberKey: false,   // shown in the UI; the key itself lives in localStorage when true
+    key: "",              // server-side, like every other JEV setting
     shadow: true,         // force every feature into shadow regardless of its own mode
     logRaw: false,        // opt-in fixtures: keep the exact state sent, not just metadata
     vision: false,        // experimental (Dreamer-era) image input
@@ -38,8 +42,7 @@ const DEFAULTS = {
     features: {},         // { [featureId]: "off" | "shadow" | "on" }
 };
 
-// The page session's key. Deliberately module state, not settings.
-let sessionKey = "";
+// The provider key lives in jevSettings().key like every other JEV setting.
 
 export function jevSettings() {
     const store = extension_settings[extensionName];
@@ -48,6 +51,10 @@ export function jevSettings() {
     const s = store.globalSettings;
     if (!s.jev || typeof s.jev !== "object") s.jev = {};
     const jev = s.jev;
+    // Earlier builds offered per-tab/browser key storage; the key is server-side
+    // now, so those flags are stale (the key itself is lifted in the UI once).
+    delete jev.keyStorage;
+    delete jev.rememberKey;
     for (const [k, v] of Object.entries(DEFAULTS)) {
         if (k === "features") continue;
         if (jev[k] === undefined) jev[k] = v;
@@ -62,40 +69,43 @@ function storage() {
     try {
         return typeof localStorage !== "undefined" ? localStorage : null;
     } catch (e) {
-        return null; // a locked-down browser: the session key still works
+        return null; // no browser storage: nothing to migrate or clean up
     }
 }
 
-export function getJevKey() {
-    if (sessionKey) return sessionKey;
-    if (!jevSettings().rememberKey) return "";
-    const ls = storage();
-    if (!ls) return "";
-    try { return String(ls.getItem(STORAGE_KEY) || "").trim(); } catch (e) { return ""; }
-}
-
-/** Store a key. `remember` persists it in this browser's localStorage; otherwise it
- *  is kept for the session and any remembered copy is removed. */
-export function setJevKey(key, remember = false) {
-    const value = String(key || "").trim();
-    sessionKey = value;
-    jevSettings().rememberKey = Boolean(remember);
-    const ls = storage();
-    if (!ls) return;
-    try {
-        if (remember && value) ls.setItem(STORAGE_KEY, value);
-        else ls.removeItem(STORAGE_KEY);
-    } catch (e) {
-        console.warn(`[${extensionName}] Could not store the JEV key in this browser.`, e);
-    }
-}
-
-export function clearJevKey() {
-    sessionKey = "";
-    jevSettings().rememberKey = false;
+function clearBrowserCopy() {
     const ls = storage();
     if (!ls) return;
     try { ls.removeItem(STORAGE_KEY); } catch (e) { /* nothing to remove */ }
+}
+
+export function getJevKey() {
+    return String(jevSettings().key || "").trim();
+}
+
+/** Store the key in this user's server-side settings. */
+export function setJevKey(key) {
+    jevSettings().key = String(key || "").trim();
+    clearBrowserCopy();
+}
+
+/** One-time lift of a key left in this browser by the earlier localStorage mode. */
+export function migrateBrowserKeyToServer() {
+    const s = jevSettings();
+    const ls = storage();
+    if (!ls) return false;
+    let stored = "";
+    try { stored = String(ls.getItem(STORAGE_KEY) || "").trim(); } catch (e) { stored = ""; }
+    if (!stored) return false;
+    const changed = !s.key;
+    if (changed) s.key = stored;
+    clearBrowserCopy();
+    return changed;
+}
+
+export function clearJevKey() {
+    jevSettings().key = "";
+    clearBrowserCopy();
 }
 
 /** Last four characters only. Never the key. */

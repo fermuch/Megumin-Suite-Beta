@@ -20,9 +20,13 @@ README on the stable branch.
 ### Settings → JEV decisions
 
 - **Two switches and a key.** The runtime is off until you turn it on and tick
-  the consent switch (story text goes to a third party). The key is per browser:
-  kept in memory for the session unless you tick "remember", and never written
-  to settings, presets, profiles, logs or error messages.
+  the consent switch (story text goes to a third party). All JEV settings —
+  provider, model, provider key, feature modes, budgets — live in this user's
+  server-side SillyTavern settings, so they follow the account across sessions
+  and browsers. That also means the key is plaintext in `settings.json` and its
+  backups, readable by anyone with access to the SillyTavern data directory. It
+  is still never copied into presets, extension profiles, the decision log,
+  diagnostics exports or error messages.
 - **Provider and model are pinned.** OpenRouter's System One route is the
   default (its browser preflight passes and it uses TypeSafe's shape); Vercel's
   AI Gateway is the alternative behind the same validation. Changing the model

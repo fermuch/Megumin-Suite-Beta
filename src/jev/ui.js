@@ -4,8 +4,9 @@
 // The panel is deliberately blunt about two things:
 //   • turning JEV on sends story text to a third party — the consent switch says
 //     so, and nothing is sent until it is on;
-//   • "remember on this browser" is the only persistent key option, and it lives
-//     in localStorage, where any script on this SillyTavern origin can read it.
+//   • the key is kept in this user's server-side settings, like every other JEV
+//     setting, so it follows the account across sessions — and the panel says
+//     plainly that this is plaintext in settings.json and its backups.
 //
 // The inspector shows what was asked, what came back, what code did with it, and
 // whether it agreed with the current behaviour — the shadow-mode evidence the doc
@@ -17,7 +18,8 @@ import { extensionName } from "../core/constants.js";
 import { FEATURES, featureIdsByStage } from "./policy.js";
 import { clearDecisions, exportBundle, labelDecision, readDecisions, summarise } from "./log.js";
 import {
-    MODES, clearJevKey, featureMode, getJevKey, jevReady, jevSettings, keyHint, setFeatureMode, setJevKey,
+    MODES, clearJevKey, featureMode, getJevKey, jevSettings, keyHint,
+    migrateBrowserKeyToServer, setFeatureMode, setJevKey,
 } from "./settings.js";
 import { jevProviderList } from "./client.js";
 import { openSetupAssistant, openLoadoutSuggestion, openAddonDiagnostics, openReplyDoctor, openContextBudgetPreview } from "./tools.js";
@@ -30,17 +32,22 @@ const clip = (s, n) => (s.length > n ? `${s.slice(0, n)}…` : s);
 
 const timeOf = at => new Date(at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
+const STORAGE_NOTE = "Plaintext in this user's server-side settings.json (globalSettings.jev.key). Synced across sessions and browsers; readable by anyone with access to the SillyTavern data directory or its settings backups.";
+
 function statusLine() {
     if (!jevSettings().enabled) return "Off. Nothing is sent anywhere.";
     if (!jevSettings().optIn) return "Waiting for consent: story text is not sent until you turn consent on.";
     if (!getJevKey()) return "Waiting for a key.";
-    return `Ready · ${keyHint()} · ${jevSettings().shadow ? "every feature is in shadow mode" : "per-feature modes apply"}`;
+    return `Ready · ${keyHint()} · kept in server settings · ${jevSettings().shadow ? "every feature is in shadow mode" : "per-feature modes apply"}`;
 }
 
 // ── The settings section ────────────────────────────────────────────────────
 
 /** Appends the whole JEV block to the Global Settings content column and wires it. */
 export function appendJevSettings($content) {
+    // One-time: a key left in this browser by the earlier localStorage mode is
+    // moved into the server settings so it syncs like everything else.
+    if (migrateBrowserKeyToServer()) saveSettingsDebounced();
     const s = jevSettings();
     const providers = jevProviderList();
     $content.append(`<div class="wstyle-section-head blue" style="margin-top:8px;"><i class="fa-solid fa-brain"></i> JEV decisions</div>`);
@@ -63,7 +70,7 @@ export function appendJevSettings($content) {
             <div class="mtab-setting-row" style="padding:0 0 10px 0; border:none;">
                 <div class="set-info">
                     <div class="set-label"><i class="fa-solid fa-key" style="color:var(--gold);"></i> Provider key</div>
-                    <div class="set-desc">Yours, per browser. Kept in memory for this session unless you tick "remember". Never written to settings, presets, profiles, logs or errors.</div>
+                    <div class="set-desc">Yours. Choose where it is kept below. It is never copied into extension profiles, presets, the decision log, diagnostics exports or error text.</div>
                 </div>
                 <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
                     <input type="password" id="jev_key" class="ps-modern-input" style="width:220px;" placeholder="${getJevKey() ? esc(keyHint()) : "paste a key"}" autocomplete="off" />
@@ -71,10 +78,12 @@ export function appendJevSettings($content) {
                     <button type="button" id="jev_key_clear" class="menu_button" style="width:auto; margin:0;">Forget</button>
                 </div>
             </div>
-            <label class="gs-bgjob" style="display:flex; align-items:center; gap:8px; margin:4px 0 12px 0;">
-                <input type="checkbox" id="jev_remember" ${s.rememberKey ? "checked" : ""} />
-                Remember on this browser <span class="set-desc" style="margin:0;">(localStorage — any script on this SillyTavern origin could read it)</span>
-            </label>
+            <div class="mtab-setting-row" style="padding:4px 0 12px 0; border:none;">
+                <div class="set-info">
+                    <div class="set-label"><i class="fa-solid fa-database" style="color:#f59e0b;"></i> Stored on the server</div>
+                    <div class="set-desc">${STORAGE_NOTE}</div>
+                </div>
+            </div>
             <div class="mtab-setting-row" style="padding:0; border:none;">
                 <div class="set-info">
                     <div class="set-label"><i class="fa-solid fa-route" style="color:#38bdf8;"></i> Provider</div>
@@ -176,11 +185,11 @@ export function appendJevSettings($content) {
     $content.find("#jev_key_save").on("click", () => {
         const value = String($content.find("#jev_key").val() || "").trim();
         if (!value) { toastr.warning("Paste a key first.", "Megumin Suite"); return; }
-        setJevKey(value, $content.find("#jev_remember").prop("checked"));
+        setJevKey(value);
         saveSettingsDebounced();
         $content.find("#jev_key").val("").attr("placeholder", keyHint());
         repaint();
-        toastr.success("Key stored for this browser session.", "Megumin Suite");
+        toastr.success("Key stored in this user's SillyTavern settings.", "Megumin Suite");
     });
     $content.find("#jev_key_clear").on("click", () => {
         clearJevKey();
@@ -188,13 +197,6 @@ export function appendJevSettings($content) {
         $content.find("#jev_key").val("").attr("placeholder", "paste a key");
         repaint();
         toastr.info("Key removed.", "Megumin Suite");
-    });
-    $content.find("#jev_remember").on("change", function () {
-        const st = jevSettings();
-        st.rememberKey = this.checked;
-        const key = getJevKey();
-        if (key) setJevKey(key, this.checked);
-        saveSettingsDebounced();
     });
     $content.find("#jev_provider").on("change", function () {
         jevSettings().provider = $(this).val();
