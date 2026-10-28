@@ -59,6 +59,9 @@ README on the stable branch.
   portrait/outfit-tag review before ComfyUI, and knowledge boundaries: every
   dossier carries a "does NOT know" line built from the Notebook's Hidden-from
   lists, and a reply that has a named NPC use one of those truths is reported.
+  World State's Off-screen notes are split per character (a list like
+  "Girl 1, Girl 2 = school" marks each of them gone), and a label name ("Girl 1")
+  is flagged and never becomes a dossier.
 - **Story Director** — whether the arc is complete, stalled or redirected. When
   JEV is confident it decides in both directions; the tracker regex and the
   frequency counter are the fallback. Generated directives are checked before

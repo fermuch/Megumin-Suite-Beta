@@ -104,6 +104,14 @@ export function resetNpcJevRanking() {
     rankPlan = { key: "", active: false, conversation: [], visual: [], conflicts: [], at: 0 };
 }
 
+/** Is this a real name rather than a label? Labels never get a dossier. */
+export async function npcJevNameOk(name) {
+    if (featureMode("entity.name") === "off") return true;
+    const judged = await jevJudge("entity.name", { names: [name] });
+    if (!judged.ok || judged.mode !== "on" || !judged.route) return true;
+    return !(judged.route.problems || []).some(p => p.name === name);
+}
+
 /** Should this reply create a dossier at all? null ⇒ no confident answer. */
 export async function npcJevWorthDossier(reply, existingNames) {
     const judged = await jevJudge("npc.dossier", { reply, existingNames });

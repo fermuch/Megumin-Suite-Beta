@@ -287,6 +287,21 @@ const BUILDERS = {
         },
     }),
 
+    // P16 — is this a name, a role, or a numbered placeholder?
+    "entity.name": (ctx) => {
+        const names = (ctx.names || []).slice(0, 6);
+        const questions = {};
+        names.forEach((n, i) => {
+            questions[`n${i}_kind`] = choice(`What kind of name is "${text(n, 120)}"?`, {
+                full: "A proper personal name with a given name and a family name.",
+                given: "A proper personal name with only one part.",
+                label: "A role, descriptor, or numbered placeholder, such as 'Girl 1' or 'the guard'.",
+                other: "A name that does not fit any of these.",
+            });
+        });
+        return { version: 1, state: {}, questions };
+    },
+
     // P12/P16 — did a character use a truth they were never told?
     "npc.knowledge": (ctx) => {
         const npcs = (ctx.npcs || []).slice(0, 3);

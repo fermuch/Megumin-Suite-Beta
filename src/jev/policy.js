@@ -33,6 +33,7 @@ export const FEATURES = {
     "npc.shortlist": { stage: 2, label: "NPC shortlist", summary: "Pick which of the whole bank is worth a full dossier ranking." },
     "npc.rank": { stage: 2, label: "NPC relevance", summary: "Rank the shortlisted dossiers and image tags by this scene." },
     "npc.dossier": { stage: 3, label: "New NPC gate", summary: "Only create a dossier for a named, recurring character." },
+    "entity.name": { stage: 3, label: "Names", summary: "Tell a real name from a role or a numbered label." },
     "npc.knowledge": { stage: 3, label: "NPC knowledge", summary: "Catch a character using a truth they were never told." },
     "npc.match": { stage: 3, label: "NPC names", summary: "Resolve an update's name to a known character under another spelling." },
     "npc.identity": { stage: 3, label: "Identity merge", summary: "Suggest, never apply, when two NPC records look like one person." },
@@ -382,6 +383,25 @@ const POLICIES = {
         const create = named >= 0.7 && worth >= 0.75 && exists < 0.5;
         const suggest = named >= 0.7 && worth >= 0.75 && exists >= 0.5 && exists < 0.8;
         return { route: { create, suggestExisting: suggest, named, worth, exists }, confidence, reason: create ? "create" : suggest ? "existing" : "skip" };
+    },
+
+    "entity.name": (answers, ctx) => {
+        const names = (ctx.names || []).slice(0, 6);
+        if (!names.length) return { route: null, confidence: 0, reason: "no names" };
+        const ids = names.map((_, i) => `n${i}_kind`);
+        if (!have(answers, ids)) return { route: null, confidence: 0, reason: "incomplete" };
+        const kinds = names.map((n, i) => ({
+            name: n,
+            kind: pick(answers, `n${i}_kind`),
+            confidence: choiceConfidence(answers, `n${i}_kind`),
+        }));
+        const problems = kinds.filter(k => k.kind === "label" && k.confidence >= 0.7);
+        const confidence = clamp01(Math.min(...kinds.map(k => k.confidence)));
+        return {
+            route: { kinds, problems },
+            confidence,
+            reason: problems.length ? problems.map(p => p.name).join(", ") : "ok",
+        };
     },
 
     "npc.knowledge": (answers, ctx) => {

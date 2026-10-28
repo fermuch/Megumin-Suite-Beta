@@ -39,6 +39,23 @@ export async function jevFilterWorldParsed(parsed, replyText) {
     if (!parsed || !Array.isArray(parsed.changes) || !parsed.changes.length) {
         return { parsed, held: [], active: false };
     }
+
+    // Names run even when state.verify is off: a label is a naming problem, not
+    // a truth problem. It reports; the cast entry is not renamed or dropped.
+    if (featureMode("entity.name") !== "off") {
+        const names = [...new Set(parsed.changes.map(c => c && c.who).filter(Boolean))].slice(0, 6);
+        if (names.length) {
+            const named = await jevJudge("entity.name", { names });
+            if (named.ok && named.mode === "on" && named.route && (named.route.problems || []).length) {
+                const labels = named.route.problems.map(p => p.name);
+                console.warn("[Megumin-Suite] World State uses label names:", labels);
+                if (typeof toastr !== "undefined") {
+                    toastr.info(`World State uses label names: ${labels.join(", ")}. Give them a full name before they matter.`, "Megumin Suite", { timeOut: 8000 });
+                }
+            }
+        }
+    }
+
     if (featureMode("state.verify") === "off") return { parsed, held: [], active: false };
 
     const pairs = parsed.changes

@@ -132,7 +132,7 @@ import {
 import { jevNewTurn } from "./src/jev/index.js";
 import { getReplyAssessment, setAssessmentContextProvider } from "./src/jev/assessments.js";
 import { setImageCastProvider } from "./src/features/imagegen/jev.js";
-import { npcJevWorthDossier, npcFilterUpdates } from "./src/features/npc/jev.js";
+import { npcJevWorthDossier, npcFilterUpdates, npcJevNameOk } from "./src/features/npc/jev.js";
 import { setNpcKnowledgeTruths, verifyNpcKnowledge } from "./src/features/npc/knowledge.js";
 import { jevArcSignal, jevCheckDirective, directiveWarningText } from "./src/features/storyplan/jev.js";
 import { verifyDiceReply } from "./src/features/blocks/jevDiceVerify.js";
@@ -811,6 +811,11 @@ jQuery(async () => {
                                 if (worth === false) dossiers = [];
                             }
                             for (const dossier of dossiers) {
+                                // A label ("Girl 1") is not an identity; no dossier.
+                                if (!(await npcJevNameOk(dossier.name))) {
+                                    toastr.info(`"${dossier.name}" is a label, not a name; no dossier was created.`, "Megumin Suite");
+                                    continue;
+                                }
                                 const npcName = dossier.name;
                                 const npcContent = dossier.raw;
                                 if (!npcBank.npcs) npcBank.npcs = [];

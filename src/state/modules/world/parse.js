@@ -455,12 +455,24 @@ function parseDeparture(rest, out, ctx) {
 function parseOffscreenItem(text, out) {
     const t = String(text || "").trim();
     if (skipValue(t)) return true;
+    // One note often lists several characters: "A = school; B, C = school".
+    // Splitting here is what lets each of them actually leave the scene.
+    const segments = t.split(/\s*;\s*/).filter(Boolean);
+    if (segments.length > 1) {
+        for (const seg of segments) parseOffscreenItem(seg, out);
+        return true;
+    }
     const m = t.match(/^(.{1,48}?)\s*(?:=|:|—|–|\s-\s)\s*(.+)$/);
     // The template's own "[NPC Name] = [where they are]" echoed back.
     if (m && (isPlaceholder(m[1]) || skipValue(m[2]))) return true;
     if (m) {
-        const cn = cleanName(m[1]);
-        if (cn) return push(out, { type: "offscreen", who: cn.name, value: m[2].trim() });
+        const value = m[2].trim();
+        const names = m[1].split(/\s*,\s*/).map(s => cleanName(s)).filter(Boolean);
+        if (names.length > 1) {
+            for (const cn of names) push(out, { type: "offscreen", who: cn.name, value });
+            return true;
+        }
+        if (names.length === 1) return push(out, { type: "offscreen", who: names[0].name, value });
     }
     return push(out, { type: "offscreen", who: null, value: t });
 }
